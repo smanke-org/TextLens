@@ -181,6 +181,7 @@ final class TranslationPanelController {
                      saveToHistory: Bool, copy: Bool) {
         task?.cancel()
         model.status = .translating
+        if model.source == nil { model.source = Recognizer.language(of: model.original) }
         task = Task {
             do {
                 let result = try await Translator.shared.translate(model.original, to: target)

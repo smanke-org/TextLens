@@ -15,10 +15,7 @@ final class CodeResultPanel {
         let panel = FloatingPanel(title: payloads.count == 1 ? "Code Found" : "\(payloads.count) Codes Found",
                                   size: CGSize(width: 400, height: 10), resizable: false)
         let view = CodeResultView(payloads: payloads) { [weak panel] in panel?.close() }
-        let hosting = NSHostingController(rootView: view)
-        hosting.sizingOptions = [.preferredContentSize]
-        panel.contentViewController = hosting
-        panel.layoutIfNeeded()
+        panel.host(view)
         panel.place(near: anchor)
         panel.orderFrontRegardless()
         self.panel = panel
@@ -222,38 +219,49 @@ private struct QRMakerView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
-            Form {
+            VStack(alignment: .leading, spacing: 14) {
                 Picker("Make a code for", selection: $model.kind) {
                     ForEach(QRMakerModel.Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
                 switch model.kind {
                 case .text:
                     TextEditor(text: $model.text)
                         .font(.body)
-                        .frame(height: 140)
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
                         .overlay(alignment: .topLeading) {
                             if model.text.isEmpty {
-                                Text("Type or paste text or a link").foregroundStyle(.tertiary).padding(6).allowsHitTesting(false)
+                                Text("Type or paste text or a link").foregroundStyle(.tertiary).padding(11).allowsHitTesting(false)
                             }
                         }
+                        .frame(height: 150)
                 case .wifi:
-                    TextField("Network name", text: $model.ssid)
-                    SecureField("Password", text: $model.password)
-                    Picker("Security", selection: $model.security) {
-                        Text("WPA/WPA2/WPA3").tag("WPA")
-                        Text("WEP").tag("WEP")
+                    Form {
+                        TextField("Network", text: $model.ssid)
+                        SecureField("Password", text: $model.password)
+                        Picker("Security", selection: $model.security) {
+                            Text("WPA/WPA2/WPA3").tag("WPA")
+                            Text("WEP").tag("WEP")
+                        }
+                        .disabled(model.password.isEmpty)
+                        Toggle("Hidden network", isOn: $model.hidden)
                     }
-                    .disabled(model.password.isEmpty)
-                    Toggle("Hidden network", isOn: $model.hidden)
+                    .frame(height: 150, alignment: .top)
                 }
                 Picker("Error correction", selection: $model.correction) {
                     Text("Low").tag("L"); Text("Medium").tag("M"); Text("High").tag("Q"); Text("Highest").tag("H")
                 }
+                .fixedSize()
                 .help("Higher correction still scans when part of the code is covered or damaged, but makes a denser code.")
+                Text("Drag the code into any app, or copy or save it.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            .formStyle(.grouped)
             .frame(width: 320)
+            .padding(.top, 12)
 
             VStack(spacing: 12) {
                 let image = QRMaker.image(for: model.content, correction: model.correction)

@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import Observation
+import SwiftUI
 
 /// What TextLens is doing right now, so an automatic update waits for a quiet moment.
 @Observable
@@ -124,7 +125,17 @@ class FloatingPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
-    /// Puts the panel beside `anchor` (a global rect), below it if there is room.
+    /// Shows SwiftUI content, sized to fit it, so placement works with the real size.
+    func host<V: View>(_ view: V) {
+        let hosting = NSHostingController(rootView: view)
+        hosting.sizingOptions = [.preferredContentSize]
+        contentViewController = hosting
+        let fitting = hosting.view.fittingSize
+        if fitting.width > 10 && fitting.height > 10 { setContentSize(fitting) }
+    }
+
+    /// Puts the panel beside `anchor` (a global rect) without covering it: below if there
+    /// is room, else above, else to the right or left.
     func place(near anchor: CGRect?) {
         let size = frame.size
         let point = anchor.map { CGPoint(x: $0.midX, y: $0.midY) } ?? NSEvent.mouseLocation
@@ -132,9 +143,16 @@ class FloatingPanel: NSPanel {
         let visible = screen.visibleFrame
         var origin: CGPoint
         if let anchor {
-            origin = CGPoint(x: anchor.minX, y: anchor.minY - size.height - 12)
-            if origin.y < visible.minY { origin.y = anchor.maxY + 12 }
-            if origin.y + size.height > visible.maxY { origin = CGPoint(x: anchor.maxX + 12, y: anchor.maxY - size.height) }
+            let gap: CGFloat = 12
+            if anchor.minY - gap - size.height >= visible.minY {
+                origin = CGPoint(x: anchor.minX, y: anchor.minY - gap - size.height)
+            } else if anchor.maxY + gap + size.height <= visible.maxY {
+                origin = CGPoint(x: anchor.minX, y: anchor.maxY + gap)
+            } else if anchor.maxX + gap + size.width <= visible.maxX {
+                origin = CGPoint(x: anchor.maxX + gap, y: anchor.maxY - size.height)
+            } else {
+                origin = CGPoint(x: anchor.minX - gap - size.width, y: anchor.maxY - size.height)
+            }
         } else {
             origin = CGPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2)
         }

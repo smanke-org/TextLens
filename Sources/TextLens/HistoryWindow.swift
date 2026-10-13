@@ -86,15 +86,21 @@ struct HistoryView: View {
             }
         }
         .searchable(text: $model.query, placement: .sidebar, prompt: "Search captured text")
+        .onChange(of: model.query) { followResults() }
+        .onChange(of: model.kind) { followResults() }
         .toolbar {
             ToolbarItem {
-                Picker("Show", selection: $model.kind) {
-                    Text("All").tag(HistoryEntry.Kind?.none)
+                Menu {
+                    Button("All Captures") { model.kind = nil }
+                    Divider()
                     ForEach(HistoryEntry.Kind.allCases, id: \.self) { kind in
-                        Label(kind.title, systemImage: kind.symbol).tag(Optional(kind))
+                        Button { model.kind = kind } label: { Label(kind.title, systemImage: kind.symbol) }
                     }
+                } label: {
+                    Label(model.kind?.title ?? "All Captures", systemImage: "line.3.horizontal.decrease.circle")
+                        .labelStyle(.titleAndIcon)
                 }
-                .pickerStyle(.menu)
+                .help("Show one kind of capture")
             }
         }
         .onCopyCommand {
@@ -122,6 +128,12 @@ struct HistoryView: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    /// Keeps the detail pane on something that matches the search.
+    private func followResults() {
+        let ids = results.map(\.id)
+        if model.selection.map({ !ids.contains($0) }) ?? true { model.selection = ids.first }
+    }
+
     private func delete(_ id: UUID) {
         let ordered = results.map(\.id)
         if let index = ordered.firstIndex(of: id) {
@@ -138,7 +150,8 @@ private struct HistoryRow: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: entry.kind.symbol).foregroundStyle(.secondary).frame(width: 18)
             VStack(alignment: .leading, spacing: 3) {
-                Text(HistoryQuery.snippet(entry.translation ?? entry.text)).lineLimit(2)
+                Text(HistoryQuery.snippet(entry.kind == .code ? CodePayload.parse(entry.text).summary : (entry.translation ?? entry.text)))
+                    .lineLimit(2)
                 HStack(spacing: 4) {
                     Text(entry.date, format: .relative(presentation: .named))
                     if let app = entry.appName { Text("· \(app)") }
@@ -169,6 +182,8 @@ private struct HistoryDetail: View {
                 }
                 .font(.callout).foregroundStyle(.secondary)
 
+                actions
+
                 if let image = store.image(for: entry) {
                     Image(nsImage: image)
                         .resizable().aspectRatio(contentMode: .fit)
@@ -185,24 +200,30 @@ private struct HistoryDetail: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .toolbar {
-            ToolbarItemGroup {
-                Button { copy(entry.translation ?? entry.text) } label: { Label("Copy", systemImage: "doc.on.doc") }
-                    .help("Copy the text")
-                Button {
-                    speech.isSpeaking ? speech.stop() : speech.speak(entry.translation ?? entry.text)
-                } label: { Label(speech.isSpeaking ? "Stop" : "Speak", systemImage: speech.isSpeaking ? "stop.fill" : "speaker.wave.2") }
-                    .help("Read the text aloud")
-                Button { TranslationPanelController.shared.translate(text: entry.text, near: nil, image: nil, app: SourceApp(name: entry.appName, bundleID: entry.appBundleID), saveToHistory: false) } label: {
-                    Label("Translate", systemImage: "translate")
-                }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            Button { copy(entry.translation ?? entry.text) } label: { Label("Copy", systemImage: "doc.on.doc") }
+                .help("Copy the text")
+            Button {
+                speech.isSpeaking ? speech.stop() : speech.speak(entry.translation ?? entry.text)
+            } label: { Label(speech.isSpeaking ? "Stop" : "Speak", systemImage: speech.isSpeaking ? "stop.fill" : "speaker.wave.2") }
+                .help("Read the text aloud")
+            Button {
+                TranslationPanelController.shared.translate(text: entry.text, near: nil, image: nil,
+                                                            app: SourceApp(name: entry.appName, bundleID: entry.appBundleID),
+                                                            saveToHistory: false)
+            } label: { Label("Translate", systemImage: "translate") }
                 .help("Translate the text")
-                Button { store.togglePin(entry.id) } label: { Label(entry.pinned ? "Unpin" : "Pin", systemImage: entry.pinned ? "pin.slash" : "pin") }
-                    .help("Pinned captures are never removed automatically")
-                Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
-                    .help("Delete this capture")
-            }
+            Spacer()
+            Button { store.togglePin(entry.id) } label: { Label(entry.pinned ? "Unpin" : "Pin", systemImage: entry.pinned ? "pin.slash" : "pin") }
+                .help("Pinned captures are never removed automatically")
+            Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
+                .help("Delete this capture")
         }
+        .labelStyle(.titleAndIcon)
+        .controlSize(.small)
     }
 
     private func section(_ title: String, _ text: String) -> some View {

@@ -99,17 +99,17 @@ final class WatchManager {
     func setUp(_ selection: RegionSelector.Selection, app: SourceApp) {
         setupPanel?.close()
         counter += 1
-        let model = WatchSetupModel(name: app.name.map { "\($0) region" } ?? "Region \(counter)")
-        let panel = FloatingPanel(title: "Watch Region", size: CGSize(width: 420, height: 440), resizable: false)
+        let model = WatchSetupModel(name: app.name.map { "Area in \($0)" } ?? "Area \(counter)")
+        let panel = FloatingPanel(title: "Watch Area", size: CGSize(width: 420, height: 440), resizable: false)
         let outline = OutlineWindow(frame: selection.globalFrame, color: .systemGreen, label: "")
         outline.orderFrontRegardless()
-        let view = WatchSetupView(model: model, image: NSImage(cgImage: selection.image, size: .zero)) { [weak self] start in
+        let view = WatchSetupView(model: model, image: selection.image) { [weak self] start in
             outline.orderOut(nil)
             self?.setupPanel?.close()
             self?.setupPanel = nil
             if start { self?.start(model: model, selection: selection, app: app) }
         }
-        panel.contentViewController = NSHostingController(rootView: view)
+        panel.host(view)
         panel.place(near: selection.globalFrame)
         panel.becomesKeyOnlyIfNeeded = false
         NSApp.activate(ignoringOtherApps: true)
@@ -193,14 +193,14 @@ final class WatchSetupModel {
 
 struct WatchSetupView: View {
     @Bindable var model: WatchSetupModel
-    let image: NSImage
+    let image: CGImage
     let done: (Bool) -> Void
 
     private static let intervals: [Double] = [1, 2, 5, 10, 30, 60, 300, 900]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Image(nsImage: image)
+            Image(decorative: image, scale: 2)
                 .resizable().aspectRatio(contentMode: .fit)
                 .frame(maxWidth: .infinity, maxHeight: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 5))

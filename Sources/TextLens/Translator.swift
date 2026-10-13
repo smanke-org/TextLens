@@ -83,8 +83,10 @@ final class Translator {
             guard allowDownload else {
                 throw TranslationFailure(message: "\(Self.name(source)) to \(Self.name(target)) needs a one-time download first.")
             }
-            guard await TranslationDownloader.prepare(source: source, target: target) else {
-                throw TranslationFailure(message: "The \(Self.name(source)) – \(Self.name(target)) languages weren't downloaded.")
+            // The download sheet can be dismissed without downloading; check it really happened.
+            guard await TranslationDownloader.prepare(source: source, target: target),
+                  await LanguageAvailability().status(from: source, to: target) == .installed else {
+                throw TranslationFailure(message: "Translating \(Self.name(source)) to \(Self.name(target)) needs those languages downloaded. Try again and choose Download.")
             }
         case .unsupported:
             throw TranslationFailure(message: "macOS can't translate \(Self.name(source)) to \(Self.name(target)).")

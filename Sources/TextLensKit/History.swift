@@ -10,7 +10,7 @@ public struct HistoryEntry: Codable, Identifiable, Equatable, Sendable {
             case .text: "Text"
             case .code: "QR & Bar Codes"
             case .translation: "Translations"
-            case .watch: "Watched Regions"
+            case .watch: "Watched Areas"
             }
         }
 
