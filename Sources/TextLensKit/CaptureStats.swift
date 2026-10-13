@@ -103,10 +103,25 @@ public struct ActivityLog: Codable, Equatable, Sendable {
     public var firstDay: String?
     /// Day → kind (a `HistoryEntry.Kind` raw value) → count.
     public var days: [String: [String: Int]]
+    /// Kind → count since counting began, kept apart from `days` because old days are
+    /// trimmed. Added in 1.0.6; nil in files written before, which `lifetimeTotals` covers
+    /// by adding up the days.
+    public var lifetime: [String: Int]?
 
-    public init(firstDay: String? = nil, days: [String: [String: Int]] = [:]) {
+    public init(firstDay: String? = nil, days: [String: [String: Int]] = [:], lifetime: [String: Int]? = nil) {
         self.firstDay = firstDay
         self.days = days
+        self.lifetime = lifetime
+    }
+
+    /// Every count since counting began, by kind.
+    public var lifetimeTotals: [String: Int] {
+        if let lifetime { return lifetime }
+        var result: [String: Int] = [:]
+        for perKind in days.values {
+            for (kind, count) in perKind { result[kind, default: 0] += count }
+        }
+        return result
     }
 
     public static func key(for date: Date, calendar: Calendar = .current) -> String {
@@ -122,6 +137,9 @@ public struct ActivityLog: Codable, Equatable, Sendable {
 
     public mutating func record(_ kind: String, at date: Date = Date(), calendar: Calendar = .current) {
         let day = Self.key(for: date, calendar: calendar)
+        // Before the first trim drops anything, so an older log starts from all it holds.
+        if lifetime == nil { lifetime = lifetimeTotals }
+        lifetime?[kind, default: 0] += 1
         days[day, default: [:]][kind, default: 0] += 1
         if firstDay.map({ day < $0 }) ?? true { firstDay = day }
     }
@@ -167,6 +185,7 @@ extension ActivityLog {
                 for (kind, count) in perKind { result.days[day, default: [:]][kind, default: 0] += count }
             }
             if let first = log.firstDay, result.firstDay.map({ first < $0 }) ?? true { result.firstDay = first }
+            for (kind, count) in log.lifetimeTotals { result.lifetime = result.lifetime ?? [:]; result.lifetime?[kind, default: 0] += count }
         }
         return result
     }

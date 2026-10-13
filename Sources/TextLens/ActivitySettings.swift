@@ -10,6 +10,8 @@ struct ActivitySettings: View {
     @State private var sync = ActivitySync.shared
     @State private var settingsSync = SettingsSync.shared
     @State private var hovered: Date?
+    /// Whether the graph shows every Mac or only this one. Kept on each Mac, not synced.
+    @AppStorage("activity.showAllMacs") private var showAllMacs = true
 
     /// What counts as a capture: text, codes and translations. Watch alerts happen on their
     /// own, so they're reported beside the graph rather than in it.
@@ -19,7 +21,8 @@ struct ActivitySettings: View {
     var body: some View {
         let now = Date()
         let remotes = sync.activeRemotes
-        let log = remotes.isEmpty ? store.log : sync.combinedLog
+        let allMacs = showAllMacs && !remotes.isEmpty
+        let log = allMacs ? sync.combinedLog : store.log
         let range = CaptureStats.range(firstDay: log.firstDay.flatMap { ActivityLog.date(for: $0) }, today: now)
         let bars = CaptureStats.bars(counts: log.counts(kinds: Self.captureKinds), range: range, today: now)
         let totals = log.totals(since: bars.first?.start ?? now)
@@ -29,11 +32,22 @@ struct ActivitySettings: View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 6) {
+                    if !remotes.isEmpty {
+                        Picker("Show", selection: $showAllMacs) {
+                            Text("This Mac").tag(false)
+                            Text("All Macs").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                        .frame(maxWidth: .infinity)
+                        .padding(.bottom, 8)
+                    }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(total, format: .number)
                             .font(.system(size: 34, weight: .semibold))
                             .monospacedDigit()
-                        Text("capture\(total == 1 ? "" : "s") in the \(range.title)\(remotes.isEmpty ? "" : " on \(remotes.count + 1) Macs")")
+                        Text("capture\(total == 1 ? "" : "s") in the \(range.title)\(remotes.isEmpty ? "" : allMacs ? " on \(remotes.count + 1) Macs" : " on this Mac")")
                             .foregroundStyle(.secondary)
                     }
                     Text(breakdown(totals))
@@ -56,26 +70,34 @@ struct ActivitySettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            macsSection(since: bars.first?.start ?? now, range: range)
+            macsSection()
         }
         .formStyle(.grouped)
         .onAppear { sync.refresh() }
     }
 
-    /// Each Mac's share of the total, so a Mac that has stopped syncing is easy to spot.
+    /// Every Mac's captures since it started counting, and all of them together, so a Mac
+    /// that has stopped syncing is easy to spot.
     @ViewBuilder
-    private func macsSection(since start: Date, range: StatsRange) -> some View {
+    private func macsSection() -> some View {
         let remotes = sync.activeRemotes
         Section {
             if !remotes.isEmpty {
-                macRow(DeviceIdentity.deviceName + " (this Mac)", status: nil, log: store.log, since: start)
+                macRow(DeviceIdentity.deviceName, status: "This Mac", log: store.log)
                 ForEach(remotes, id: \.deviceID) { mac in
-                    macRow(mac.deviceName, status: "Updated \(mac.updatedAt.formatted(.relative(presentation: .named)))",
-                           log: mac.log, since: start)
+                    macRow(mac.deviceName, status: "Synced \(mac.updatedAt.formatted(.relative(presentation: .named)))",
+                           log: mac.log)
                 }
             }
         } header: {
-            Text("All Macs")
+            HStack {
+                Text("All Macs")
+                Spacer()
+                if !remotes.isEmpty {
+                    Text("\(Self.captures(in: sync.combinedLog).formatted()) captures")
+                        .monospacedDigit()
+                }
+            }
         } footer: {
             Group {
                 if !settingsSync.isEnabled {
@@ -85,22 +107,26 @@ struct ActivitySettings: View {
                 } else if remotes.isEmpty {
                     Text("Captures from your other Macs are added here once TextLens on them has settings sync turned on.")
                 } else {
-                    Text("Every Mac with settings sync on is counted, through iCloud Drive › TextLens › Activity. Only the numbers are shared. Deleting a Mac's file there removes it.")
+                    Text("Each Mac's captures since TextLens started counting there. Every Mac with settings sync on is counted, through iCloud Drive › TextLens › Activity. Only the numbers are shared. Deleting a Mac's file there removes it.")
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private func macRow(_ name: String, status: String?, log: ActivityLog, since start: Date) -> some View {
-        let totals = log.totals(since: start)
-        let count = Self.captureKinds.reduce(0) { $0 + (totals[$1] ?? 0) }
-        return LabeledContent {
-            Text(count, format: .number).monospacedDigit()
+    private func macRow(_ name: String, status: String, log: ActivityLog) -> some View {
+        LabeledContent {
+            Text(Self.captures(in: log), format: .number).monospacedDigit()
         } label: {
             Text(name)
-            if let status { Text(status) }
+            Text(status)
         }
+    }
+
+    /// Captures since counting began; watch alerts aren't captures.
+    private static func captures(in log: ActivityLog) -> Int {
+        let totals = log.lifetimeTotals
+        return captureKinds.reduce(0) { $0 + (totals[$1] ?? 0) }
     }
 
     @ViewBuilder

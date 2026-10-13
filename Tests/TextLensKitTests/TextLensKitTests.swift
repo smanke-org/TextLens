@@ -253,6 +253,29 @@ private func line(_ text: String, row: Double, x: Double = 0.05, width: Double =
         #expect(ActivityLog.combined([ActivityLog()]).firstDay == nil)
     }
 
+    @Test func lifetimeOutlivesTrimmedDays() {
+        let cal = Calendar(identifier: .gregorian)
+        let old = cal.date(from: DateComponents(year: 2024, month: 1, day: 5))!
+        let now = cal.date(from: DateComponents(year: 2026, month: 10, day: 13))!
+        var log = ActivityLog()
+        log.record("text", at: old, calendar: cal)
+        log.record("text", at: now, calendar: cal)
+        log.record("code", at: now, calendar: cal)
+        log.trim(now: now, calendar: cal)
+        #expect(log.days.count == 1)
+        #expect(log.lifetimeTotals == ["text": 2, "code": 1])
+    }
+
+    @Test func olderLogsStartLifetimeFromTheirDays() {
+        // A 1.0.5 file has no lifetime: it counts its days, and keeps them on the next capture.
+        var log = ActivityLog(firstDay: "2026-10-01", days: ["2026-10-01": ["text": 4], "2026-10-02": ["watch": 2]])
+        #expect(log.lifetimeTotals == ["text": 4, "watch": 2])
+        log.record("text")
+        #expect(log.lifetime == ["text": 5, "watch": 2])
+        let all = ActivityLog.combined([log, ActivityLog(days: ["2026-10-03": ["text": 1]])])
+        #expect(all.lifetimeTotals == ["text": 6, "watch": 2])
+    }
+
     @Test func deviceFileRoundTrips() throws {
         let record = DeviceActivity(deviceID: "abc", deviceName: "Test Mac", updatedAt: Date(timeIntervalSince1970: 1_800_000_000),
                                     appVersion: "1.0.5", log: ActivityLog(firstDay: "2026-10-13", days: ["2026-10-13": ["text": 3]]))
