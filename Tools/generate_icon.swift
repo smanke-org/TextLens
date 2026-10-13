@@ -39,8 +39,8 @@ ctx.clip()
 
 let colorSpace = CGColorSpaceCreateDeviceRGB()
 let bodyColors = [
-    NSColor(srgbRed: 1.00, green: 0.56, blue: 0.16, alpha: 1.0).cgColor,
-    NSColor(srgbRed: 0.91, green: 0.30, blue: 0.00, alpha: 1.0).cgColor,
+    NSColor(srgbRed: 0.80, green: 0.91, blue: 1.00, alpha: 1.0).cgColor,
+    NSColor(srgbRed: 0.56, green: 0.77, blue: 0.96, alpha: 1.0).cgColor,
 ] as CFArray
 let bodyGradient = CGGradient(colorsSpace: colorSpace, colors: bodyColors, locations: [0.0, 1.0])!
 ctx.drawLinearGradient(
