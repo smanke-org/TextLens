@@ -237,3 +237,26 @@ private func line(_ text: String, row: Double, x: Double = 0.05, width: Double =
         #expect(log.firstDay == "2025-01-01")
     }
 }
+
+@Suite struct ActivitySyncTests {
+    @Test func combinesMacs() {
+        let a = ActivityLog(firstDay: "2026-09-01", days: ["2026-10-12": ["text": 2, "code": 1], "2026-10-13": ["text": 1]])
+        let b = ActivityLog(firstDay: "2026-08-15", days: ["2026-10-13": ["text": 4, "watch": 2]])
+        let all = ActivityLog.combined([a, b])
+        #expect(all.firstDay == "2026-08-15")
+        #expect(all.days["2026-10-12"] == ["text": 2, "code": 1])
+        #expect(all.days["2026-10-13"] == ["text": 5, "watch": 2])
+    }
+
+    @Test func combiningNothingIsEmpty() {
+        #expect(ActivityLog.combined([]) == ActivityLog())
+        #expect(ActivityLog.combined([ActivityLog()]).firstDay == nil)
+    }
+
+    @Test func deviceFileRoundTrips() throws {
+        let record = DeviceActivity(deviceID: "abc", deviceName: "Test Mac", updatedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                                    appVersion: "1.0.5", log: ActivityLog(firstDay: "2026-10-13", days: ["2026-10-13": ["text": 3]]))
+        let data = try DeviceActivity.encoder.encode(record)
+        #expect(try DeviceActivity.decoder.decode(DeviceActivity.self, from: data) == record)
+    }
+}

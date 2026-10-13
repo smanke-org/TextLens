@@ -30,6 +30,7 @@ final class ActivityStore {
         log.record(kind.rawValue)
         log.trim()
         save()
+        ActivitySync.shared.localDidChange()
     }
 
     /// The first time the graph exists, start it from whatever History already holds.

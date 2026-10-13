@@ -155,3 +155,52 @@ public struct ActivityLog: Codable, Equatable, Sendable {
         return result
     }
 }
+
+extension ActivityLog {
+    /// Several Macs' logs added together, for the All Macs graph. Days are matched by
+    /// their "yyyy-MM-dd" key, each counted in its own Mac's time zone, and the earliest
+    /// first day wins, so the graph's range reflects the Mac that has used TextLens longest.
+    public static func combined(_ logs: [ActivityLog]) -> ActivityLog {
+        var result = ActivityLog()
+        for log in logs {
+            for (day, perKind) in log.days {
+                for (kind, count) in perKind { result.days[day, default: [:]][kind, default: 0] += count }
+            }
+            if let first = log.firstDay, result.firstDay.map({ first < $0 }) ?? true { result.firstDay = first }
+        }
+        return result
+    }
+}
+
+/// One Mac's activity, as shared with the user's other Macs through iCloud Drive. Each Mac
+/// writes only its own file, and the counts in it are whole-day totals rather than
+/// increments, so a stale, repeated or delayed file can never count anything twice.
+public struct DeviceActivity: Codable, Equatable, Sendable {
+    public var schema = 1
+    public var deviceID: String
+    public var deviceName: String
+    public var updatedAt: Date
+    public var appVersion: String?
+    public var log: ActivityLog
+
+    public init(deviceID: String, deviceName: String, updatedAt: Date, appVersion: String?, log: ActivityLog) {
+        self.deviceID = deviceID
+        self.deviceName = deviceName
+        self.updatedAt = updatedAt
+        self.appVersion = appVersion
+        self.log = log
+    }
+
+    public static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }()
+
+    public static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+}

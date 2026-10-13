@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let newInstall = !UserDefaults.standard.bool(forKey: "welcomed")
         if newInstall { SettingsSync.shared.adoptOnNewInstall() }
         SettingsSync.shared.start()
+        ActivitySync.shared.start()
 
         HotKeyCenter.shared.perform = { [weak self] action in self?.perform(action) }
         HotKeyCenter.shared.apply()
@@ -52,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         WatchManager.shared.stopAll()
         LiveTranslator.shared.stop()
+        ActivitySync.shared.flush()
     }
 
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {

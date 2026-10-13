@@ -4,8 +4,11 @@ import TextLensKit
 
 /// Settings › Activity: how many captures TextLens has made over time. The graph starts at
 /// a week and widens to 30, 90 and 180 days, then a year, as more days of data build up.
+/// With settings sync on, it adds up every Mac that shares TextLens settings.
 struct ActivitySettings: View {
     @State private var store = ActivityStore.shared
+    @State private var sync = ActivitySync.shared
+    @State private var settingsSync = SettingsSync.shared
     @State private var hovered: Date?
 
     /// What counts as a capture: text, codes and translations. Watch alerts happen on their
@@ -15,9 +18,11 @@ struct ActivitySettings: View {
 
     var body: some View {
         let now = Date()
-        let range = CaptureStats.range(firstDay: store.log.firstDay.flatMap { ActivityLog.date(for: $0) }, today: now)
-        let bars = CaptureStats.bars(counts: store.log.counts(kinds: Self.captureKinds), range: range, today: now)
-        let totals = store.log.totals(since: bars.first?.start ?? now)
+        let remotes = sync.activeRemotes
+        let log = remotes.isEmpty ? store.log : sync.combinedLog
+        let range = CaptureStats.range(firstDay: log.firstDay.flatMap { ActivityLog.date(for: $0) }, today: now)
+        let bars = CaptureStats.bars(counts: log.counts(kinds: Self.captureKinds), range: range, today: now)
+        let totals = log.totals(since: bars.first?.start ?? now)
         let total = Self.captureKinds.reduce(0) { $0 + (totals[$1] ?? 0) }
         let hoveredBar = hovered.flatMap { date in bars.first { date >= $0.start && date < $0.end } }
 
@@ -28,7 +33,7 @@ struct ActivitySettings: View {
                         Text(total, format: .number)
                             .font(.system(size: 34, weight: .semibold))
                             .monospacedDigit()
-                        Text("capture\(total == 1 ? "" : "s") in the \(range.title)")
+                        Text("capture\(total == 1 ? "" : "s") in the \(range.title)\(remotes.isEmpty ? "" : " on \(remotes.count + 1) Macs")")
                             .foregroundStyle(.secondary)
                     }
                     Text(breakdown(totals))
@@ -50,8 +55,52 @@ struct ActivitySettings: View {
                 Text("The graph widens as you use TextLens: 7 days at first, then 30, 90 and 180 days, then a year. It counts captures even when History is off; only the numbers are kept, never what you captured.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            macsSection(since: bars.first?.start ?? now, range: range)
         }
         .formStyle(.grouped)
+        .onAppear { sync.refresh() }
+    }
+
+    /// Each Mac's share of the total, so a Mac that has stopped syncing is easy to spot.
+    @ViewBuilder
+    private func macsSection(since start: Date, range: StatsRange) -> some View {
+        let remotes = sync.activeRemotes
+        Section {
+            if !remotes.isEmpty {
+                macRow(DeviceIdentity.deviceName + " (this Mac)", status: nil, log: store.log, since: start)
+                ForEach(remotes, id: \.deviceID) { mac in
+                    macRow(mac.deviceName, status: "Updated \(mac.updatedAt.formatted(.relative(presentation: .named)))",
+                           log: mac.log, since: start)
+                }
+            }
+        } header: {
+            Text("All Macs")
+        } footer: {
+            Group {
+                if !settingsSync.isEnabled {
+                    Text("Turn on “Sync settings with your other Macs” in General to add up captures from every Mac that uses TextLens.")
+                } else if !settingsSync.iCloudDriveAvailable {
+                    Text("Turn on iCloud Drive to add up captures from your other Macs.")
+                } else if remotes.isEmpty {
+                    Text("Captures from your other Macs are added here once TextLens on them has settings sync turned on.")
+                } else {
+                    Text("Every Mac with settings sync on is counted, through iCloud Drive › TextLens › Activity. Only the numbers are shared. Deleting a Mac's file there removes it.")
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func macRow(_ name: String, status: String?, log: ActivityLog, since start: Date) -> some View {
+        let totals = log.totals(since: start)
+        let count = Self.captureKinds.reduce(0) { $0 + (totals[$1] ?? 0) }
+        return LabeledContent {
+            Text(count, format: .number).monospacedDigit()
+        } label: {
+            Text(name)
+            if let status { Text(status) }
+        }
     }
 
     @ViewBuilder

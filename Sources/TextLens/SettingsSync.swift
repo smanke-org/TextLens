@@ -27,6 +27,7 @@ final class SettingsSync {
             } else {
                 stop()
             }
+            ActivitySync.shared.start()
         }
     }
     private(set) var lastSynced: Date?
