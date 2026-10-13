@@ -245,9 +245,9 @@ final class LiveTranslator {
             Notice.shared.show("Live translation on. \(Preferences.shared.liveTranslateHotKey?.display ?? "The menu") stops it.",
                                symbol: "translate", tint: .systemBlue, near: frame, duration: 2.5)
         } else {
-            let panel = FloatingPanel(title: "Live Translation", size: CGSize(width: max(380, min(frame.width, 700)), height: 200))
+            let panel = FloatingPanel(title: "Live Translation", size: CGSize(width: max(380, min(frame.width, 700)), height: 260))
             panel.contentViewController = NSHostingController(rootView: TranslationView(model: model))
-            panel.setContentSize(CGSize(width: max(380, min(frame.width, 700)), height: 200))
+            panel.setContentSize(CGSize(width: max(380, min(frame.width, 700)), height: 260))
             panel.place(near: frame)
             panel.delegate = closer
             panel.orderFrontRegardless()
@@ -295,6 +295,7 @@ final class LiveTranslator {
                     } else if force || ChangeDetector.similarity(text, lastRead) < 0.97 {
                         lastRead = text
                         model.original = text
+                        model.source = Recognizer.language(of: text) ?? model.source
                         model.status = .translating
                         let result = try await Translator.shared.translate(text, to: model.target, allowDownload: !downloadOffered)
                         guard !Task.isCancelled else { return }
