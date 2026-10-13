@@ -17,6 +17,9 @@ APP="$BUILD/$APP_NAME.app"
 SWIFT_ARGS=(-c release --arch arm64 --arch x86_64 --build-path "$BUILD_PATH")
 
 echo "==> Building universal binary"
+# Delete the old product first: a change that doesn't need relinking (a comment) would
+# otherwise leave an older binary behind and trip the freshness check below.
+rm -f "$(swift build "${SWIFT_ARGS[@]}" --show-bin-path)/$APP_NAME"
 swift build "${SWIFT_ARGS[@]}"
 
 # Ask SwiftPM where it put the binary rather than assuming: the location has moved
