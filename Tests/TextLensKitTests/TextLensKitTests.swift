@@ -172,3 +172,68 @@ private func line(_ text: String, row: Double, x: Double = 0.05, width: Double =
         #expect(entry.pinned == false)
     }
 }
+
+@Suite struct CaptureStatsTests {
+    var cal: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York")!
+        return c
+    }()
+    func day(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12) -> Date {
+        cal.date(from: DateComponents(year: y, month: m, day: d, hour: hour))!
+    }
+
+    @Test func rangeGrowsWithHistory() {
+        let today = day(2026, 10, 13)
+        #expect(CaptureStats.range(firstDay: nil, today: today, calendar: cal) == .week)
+        #expect(CaptureStats.range(firstDay: today, today: today, calendar: cal) == .week)
+        #expect(CaptureStats.range(firstDay: day(2026, 10, 7), today: today, calendar: cal) == .week)      // 7 days
+        #expect(CaptureStats.range(firstDay: day(2026, 10, 6), today: today, calendar: cal) == .month)     // 8 days
+        #expect(CaptureStats.range(firstDay: day(2026, 9, 14), today: today, calendar: cal) == .month)     // 30 days
+        #expect(CaptureStats.range(firstDay: day(2026, 9, 13), today: today, calendar: cal) == .quarter)   // 31 days
+        #expect(CaptureStats.range(firstDay: day(2026, 7, 16), today: today, calendar: cal) == .quarter)   // 90 days
+        #expect(CaptureStats.range(firstDay: day(2026, 7, 15), today: today, calendar: cal) == .halfYear)  // 91 days
+        #expect(CaptureStats.range(firstDay: day(2026, 4, 17), today: today, calendar: cal) == .halfYear)  // 180 days
+        #expect(CaptureStats.range(firstDay: day(2026, 4, 16), today: today, calendar: cal) == .year)
+        #expect(CaptureStats.range(firstDay: day(2024, 1, 1), today: today, calendar: cal) == .year)
+    }
+
+    @Test func dailyBarsEndToday() {
+        let today = day(2026, 10, 13, hour: 23)
+        let counts: [Date: Int] = [day(2026, 10, 13): 3, day(2026, 10, 7): 2, day(2026, 10, 6): 9]
+        let bars = CaptureStats.bars(counts: counts, range: .week, today: today, calendar: cal)
+        #expect(bars.count == 7)
+        #expect(bars.first!.start == cal.startOfDay(for: day(2026, 10, 7)))
+        #expect(bars.last!.count == 3)
+        #expect(bars.first!.count == 2)                       // Oct 6 falls outside the week
+        #expect(bars.map(\.count).reduce(0, +) == 5)
+    }
+
+    @Test func weeklyAndMonthlyBars() {
+        let today = day(2026, 10, 13)
+        let counts: [Date: Int] = [day(2026, 10, 13): 1, day(2026, 10, 7): 1, day(2026, 10, 6): 4, day(2025, 11, 2): 5, day(2025, 10, 30): 7]
+        let quarter = CaptureStats.bars(counts: counts, range: .quarter, today: today, calendar: cal)
+        #expect(quarter.count == 13)
+        #expect(quarter.last!.count == 2)                     // Oct 7–13
+        #expect(quarter[quarter.count - 2].count == 4)        // Sep 30–Oct 6
+        let year = CaptureStats.bars(counts: counts, range: .year, today: today, calendar: cal)
+        #expect(year.count == 12)
+        #expect(year.first!.start == cal.date(from: DateComponents(year: 2025, month: 11, day: 1)))
+        #expect(year.first!.count == 5)                       // Oct 30, 2025 is too old
+        #expect(year.last!.count == 6)
+    }
+
+    @Test func logRecordsTrimsAndTotals() {
+        var log = ActivityLog()
+        log.record("text", at: day(2026, 10, 13), calendar: cal)
+        log.record("text", at: day(2026, 10, 13), calendar: cal)
+        log.record("code", at: day(2026, 10, 12), calendar: cal)
+        log.record("watch", at: day(2025, 1, 1), calendar: cal)
+        #expect(log.firstDay == "2025-01-01")
+        #expect(log.counts(kinds: ["text", "code"], calendar: cal)[cal.startOfDay(for: day(2026, 10, 13))] == 2)
+        #expect(log.totals(since: day(2026, 10, 1), calendar: cal) == ["text": 2, "code": 1])
+        log.trim(keepDays: 400, now: day(2026, 10, 13), calendar: cal)
+        #expect(log.days["2025-01-01"] == nil)
+        #expect(log.firstDay == "2025-01-01")
+    }
+}

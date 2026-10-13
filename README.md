@@ -6,7 +6,7 @@ Apple's own text recognition and translation, and nothing is uploaded.
 
 TextLens also:
 - **Translates** what you capture, or keeps translating an area live (subtitles, chats, slides).
-- **Remembers** every capture in a searchable history.
+- **Remembers** every capture in a searchable history, and graphs how much you capture over time.
 - **Watches** an area of the screen and tells you when its text changes, or when a word shows up or goes away.
 - **Reads and makes QR codes**: open links, join Wi-Fi, add contacts, or make a code for a link or your Wi-Fi.
 

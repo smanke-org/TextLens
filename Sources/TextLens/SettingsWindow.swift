@@ -41,6 +41,7 @@ final class SettingsTabs: NSTabViewController {
         add("Translate", "translate", TranslateSettings())
         add("Watch", "eye", WatchSettings())
         add("History", "clock.arrow.circlepath", HistorySettings())
+        add("Activity", "chart.bar.xaxis", ActivitySettings())
         add("Shortcuts", "keyboard", ShortcutSettings())
         add("General", "gearshape", GeneralSettings())
     }

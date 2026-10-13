@@ -74,6 +74,7 @@ final class Capture {
         let what = prefs.additiveClipboard ? "Added \(count) characters to the clipboard" : "Copied \(count) character\(count == 1 ? "" : "s")"
         Notice.shared.show(what, symbol: "text.viewfinder", near: frame)
         HistoryStore.shared.add(kind: .text, text: text, app: app, image: image)
+        ActivityStore.shared.record(.text)
         if prefs.speakAfterCapture { Speech.shared.speak(text) }
         if prefs.openLinks, let url = Self.firstLink(in: text) { NSWorkspace.shared.open(url) }
     }
@@ -107,6 +108,7 @@ final class Capture {
             Clipboard.copy(joined)
             Sounds.success()
             for payload in payloads { HistoryStore.shared.add(kind: .code, text: payload, app: app, image: image) }
+            ActivityStore.shared.record(.code)
             if Preferences.shared.openLinks, payloads.count == 1, case .url(let url) = CodePayload.parse(payloads[0]) {
                 NSWorkspace.shared.open(url)
                 Notice.shared.show("Opened \(url.host ?? "link")", symbol: "qrcode", near: frame)

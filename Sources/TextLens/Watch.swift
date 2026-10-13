@@ -71,6 +71,7 @@ final class Watch: Identifiable {
         Sounds.watchFired()
         let prefs = Preferences.shared
         var entry: HistoryEntry?
+        ActivityStore.shared.record(.watch)
         if prefs.watchSaveToHistory {
             entry = HistoryStore.shared.add(kind: .watch, text: new, app: app, image: image)
         }

@@ -192,6 +192,8 @@ final class TranslationPanelController {
                 model.status = .done
                 if copy { copyResult(model) }
                 if saveToHistory {
+                    // Counted once per capture, not again when the language is changed.
+                    if copy { ActivityStore.shared.record(.translation) }
                     HistoryStore.shared.add(kind: .translation, text: model.original, translation: result.text,
                                             sourceLanguage: result.source.minimalIdentifier,
                                             targetLanguage: result.target.minimalIdentifier, app: app, image: image)
