@@ -27,15 +27,21 @@ private struct CodeResultView: View {
     let close: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(Array(payloads.enumerated()), id: \.offset) { _, raw in
-                CodeRow(raw: raw, close: close)
-                if raw != payloads.last { Divider() }
+        // Scrolls, no taller than the screen, when a scan finds many codes. The panel
+        // follows this view's height, and a panel taller than the screen gets clamped by
+        // AppKit and asked to grow again by SwiftUI until AppKit aborts.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(payloads.enumerated()), id: \.offset) { _, raw in
+                    CodeRow(raw: raw, close: close)
+                    if raw != payloads.last { Divider() }
+                }
             }
+            .padding(16)
+            .padding(.top, 14)
         }
-        .padding(16)
-        .padding(.top, 14)
         .frame(width: 400)
+        .frame(maxHeight: (NSScreen.main?.visibleFrame.height ?? 800) - 80)
     }
 }
 

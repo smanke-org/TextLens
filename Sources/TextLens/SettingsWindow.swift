@@ -55,14 +55,37 @@ final class SettingsTabs: NSTabViewController {
                 .font(.caption).foregroundStyle(.secondary)
                 .padding(.bottom, 12)
         }
-        let hosting = NSHostingController(rootView: pane.frame(width: 520).fixedSize(horizontal: false, vertical: true))
-        // Without this a grouped Form has no natural height and opens as a sliver.
-        hosting.sizingOptions = [.preferredContentSize]
+        .frame(width: 520)
+        // Each pane gets its natural height, capped to the screen, with the Form scrolling
+        // inside. Letting SwiftUI size the window to the Form's full height crashed once
+        // a pane grew taller than the screen: AppKit clamped the window, SwiftUI asked to
+        // grow again, and AppKit aborted the update-constraints loop.
+        let hosting = NSHostingController(rootView: pane.frame(maxHeight: .infinity))
+        hosting.sizingOptions = []
         hosting.title = title
         let item = NSTabViewItem(viewController: hosting)
         item.label = title
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         addTabViewItem(item)
+        naturalHeight[item] = { NSHostingView(rootView: pane).fittingSize.height }
+        fit(item)
+    }
+
+    /// Measures a pane on a throwaway hosting view, so the window never follows SwiftUI.
+    private var naturalHeight: [NSTabViewItem: () -> CGFloat] = [:]
+
+    /// Sizes a pane before it's shown (re-measured each time, as panes change), no taller
+    /// than the screen.
+    private func fit(_ item: NSTabViewItem) {
+        guard let height = naturalHeight[item]?() else { return }
+        let screen = (isViewLoaded ? view.window?.screen : nil) ?? NSScreen.main
+        let available = (screen?.visibleFrame.height ?? 800) - 120
+        item.viewController?.preferredContentSize = NSSize(width: 520, height: min(height, available))
+    }
+
+    override func tabView(_ tabView: NSTabView, willSelect tabViewItem: NSTabViewItem?) {
+        if let tabViewItem { fit(tabViewItem) }
+        super.tabView(tabView, willSelect: tabViewItem)
     }
 
     override func viewDidAppear() {
@@ -403,7 +426,7 @@ struct GeneralSettings: View {
             } header: {
                 Text("iCloud")
             } footer: {
-                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on. Your capture history and open at login stay on each Mac.")
+                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on, and Activity adds up their captures. Your capture history and open at login stay on each Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
