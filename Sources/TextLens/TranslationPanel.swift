@@ -278,6 +278,8 @@ final class LiveTranslator {
     private func loop(camera: ScreenGrabber.RegionCamera, model: TranslationModel) {
         task = Task { [weak self] in
             var lastRead = ""
+            // Offer a language download once; asking again every second would be maddening.
+            var downloadOffered = false
             while !Task.isCancelled {
                 let started = Date()
                 do {
@@ -286,13 +288,14 @@ final class LiveTranslator {
                                                          options: .current)
                     let force = self?.forceRefresh ?? false
                     self?.forceRefresh = false
+                    if force { downloadOffered = false }
                     if text.isEmpty {
                         if model.translated.isEmpty { model.status = .reading }
                     } else if force || ChangeDetector.similarity(text, lastRead) < 0.97 {
                         lastRead = text
                         model.original = text
                         model.status = .translating
-                        let result = try await Translator.shared.translate(text, to: model.target)
+                        let result = try await Translator.shared.translate(text, to: model.target, allowDownload: !downloadOffered)
                         guard !Task.isCancelled else { return }
                         model.source = result.source
                         model.translated = result.text
@@ -305,6 +308,8 @@ final class LiveTranslator {
                     return
                 } catch {
                     guard !Task.isCancelled else { return }
+                    downloadOffered = true
+                    lastRead = ""
                     model.status = .failed(error.localizedDescription)
                     // A missing language pair won't fix itself; wait longer before retrying.
                     try? await Task.sleep(for: .seconds(4))

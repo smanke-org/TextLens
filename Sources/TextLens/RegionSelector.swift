@@ -31,6 +31,8 @@ final class RegionSelector {
         }
         isSelecting = true
         defer { isSelecting = false }
+        // Started from the menu bar menu: let it finish fading out so it isn't in the picture.
+        try? await Task.sleep(for: .milliseconds(150))
 
         let images: [CGDirectDisplayID: CGImage]
         do {
