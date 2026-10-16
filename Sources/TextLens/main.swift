@@ -32,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if newInstall { SettingsSync.shared.adoptOnNewInstall() }
         SettingsSync.shared.start()
         ActivitySync.shared.start()
+        #if DEBUG
+        SyncDebugHook.run()
+        #endif
 
         HotKeyCenter.shared.perform = { [weak self] action in self?.perform(action) }
         HotKeyCenter.shared.apply()
@@ -43,11 +46,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         HistoryStore.shared.prune()
         AutoUpdater.shared.start()
+        // Sync is on but waiting for a passphrase (just updated from an unencrypted version,
+        // or joining another Mac): say so where it can be entered, once per version.
+        let sync = SettingsSync.shared
+        let syncNeedsPassphrase = sync.isEnabled && [.needsPassphrase, .needsNewPassphrase].contains(sync.keyState)
+            && UserDefaults.standard.string(forKey: "sync.passphrasePromptVersion") != AppInfo.version
+        if syncNeedsPassphrase { UserDefaults.standard.set(AppInfo.version, forKey: "sync.passphrasePromptVersion") }
         if newInstall {
             UserDefaults.standard.set(true, forKey: "welcomed")
             // Ask for Screen Recording up front, so the first capture just works.
             if !ScreenAccess.granted { ScreenAccess.request() }
-            showSettings()
+            SettingsWindow.shared.show(tab: syncNeedsPassphrase ? "General" : nil)
+        } else if syncNeedsPassphrase {
+            SettingsWindow.shared.show(tab: "General")
         } else if !AppPresence.showInMenuBar && !AppPresence.showInDock {
             showSettings()
         }

@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 import Testing
 @testable import TextLensKit
@@ -281,5 +282,24 @@ private func line(_ text: String, row: Double, x: Double = 0.05, width: Double =
                                     appVersion: "1.0.5", log: ActivityLog(firstDay: "2026-10-13", days: ["2026-10-13": ["text": 3]]))
         let data = try DeviceActivity.encoder.encode(record)
         #expect(try DeviceActivity.decoder.decode(DeviceActivity.self, from: data) == record)
+    }
+
+    @Test func syncKeyringUnlocksOnlyWithItsPassphrase() throws {
+        let (keyring, key) = try SyncCrypto.createKeyring(passphrase: "correct horse", iterations: 1_000)
+        let unwrapped = try SyncCrypto.unwrap(keyring, passphrase: "correct horse")
+        #expect(SyncCrypto.keyID(for: unwrapped) == keyring.keyID)
+        #expect(SyncCrypto.keyID(for: key) == keyring.keyID)
+        #expect(throws: SyncCrypto.CryptoError.self) { try SyncCrypto.unwrap(keyring, passphrase: "wrong horse") }
+    }
+
+    @Test func sealedFilesHideTheirContents() throws {
+        let key = SymmetricKey(size: .bits256)
+        let plain = Data(String(repeating: "captureShortcut=⌃⌥⌘1 ", count: 40).utf8)
+        let sealed = try SyncCrypto.seal(plain, using: key)
+        #expect(sealed.prefix(4) == Data("TLE1".utf8))
+        #expect(sealed.range(of: Data("captureShortcut".utf8)) == nil)
+        #expect(try SyncCrypto.open(sealed, using: key) == plain)
+        #expect(throws: SyncCrypto.CryptoError.self) { try SyncCrypto.open(sealed, using: SymmetricKey(size: .bits256)) }
+        #expect(throws: SyncCrypto.CryptoError.self) { try SyncCrypto.open(plain, using: key) }
     }
 }

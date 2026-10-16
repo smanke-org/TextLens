@@ -39,6 +39,17 @@ Settings › Activity graphs how many captures you've made. With "Sync settings 
 on, it adds up the captures from every Mac that uses TextLens. Only the counts are shared through iCloud
 Drive, never what you captured.
 
+## Privacy
+
+Text recognition, translation and QR codes run entirely on your Mac, and your capture history never leaves
+it. TextLens has no account, analytics or tracking, and nothing is ever sent to the developer. The only
+connection it makes on its own is to GitHub, to check for updates.
+
+Settings sync is end-to-end encrypted. Your settings and capture counts are sealed with AES-256-GCM on your
+Mac before they reach iCloud Drive, using a key that only your sync passphrase unlocks. The passphrase never
+leaves your Macs, so neither Apple nor the developer can read what's synced. Settings › Privacy explains all
+of this in the app.
+
 ## Updates
 
 TextLens checks for new versions every 30 minutes. In Settings › General you choose whether it installs them

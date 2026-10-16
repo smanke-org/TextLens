@@ -11,7 +11,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     private var window: NSWindow?
 
-    func show() {
+    func show(tab: String? = nil) {
         if window == nil {
             let tabs = SettingsTabs()
             let window = NSWindow(contentViewController: tabs)
@@ -21,7 +21,12 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             window.delegate = self
             window.center()
             self.window = window
+            #if DEBUG
+            // Debug builds only: `TEXTLENS_SETTINGS_TAB=Privacy` opens on that pane, for checking it.
+            if tab == nil, let debugTab = ProcessInfo.processInfo.environment["TEXTLENS_SETTINGS_TAB"] { tabs.select(debugTab) }
+            #endif
         }
+        if let tab, let tabs = window?.contentViewController as? SettingsTabs { tabs.select(tab) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
@@ -43,6 +48,7 @@ final class SettingsTabs: NSTabViewController {
         add("History", "clock.arrow.circlepath", HistorySettings())
         add("Activity", "chart.bar.xaxis", ActivitySettings())
         add("Shortcuts", "keyboard", ShortcutSettings())
+        add("Privacy", "hand.raised", PrivacySettings())
         add("General", "gearshape", GeneralSettings())
     }
 
@@ -96,6 +102,10 @@ final class SettingsTabs: NSTabViewController {
     override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         super.tabView(tabView, didSelect: tabViewItem)
         selectionChanged()
+    }
+
+    func select(_ label: String) {
+        if let index = tabViewItems.firstIndex(where: { $0.label == label }) { selectedTabViewItemIndex = index }
     }
 
     private func selectionChanged() {
@@ -411,22 +421,32 @@ struct GeneralSettings: View {
             Section {
                 Toggle("Sync settings with your other Macs", isOn: $sync.isEnabled)
                 if sync.isEnabled {
-                    LabeledContent {
-                        Button("Sync Now") { sync.syncNow() }
-                    } label: {
-                        if let error = sync.lastError {
-                            Text(error).foregroundStyle(.red)
-                        } else if let date = sync.lastSynced {
-                            Text("Synced \(date.formatted(date: .omitted, time: .shortened))\(sync.lastSource.map { $0 == SettingsSync.deviceName ? "" : " from \($0)" } ?? "")")
-                        } else {
-                            Text("Waiting for iCloud Drive…")
+                    if sync.keyState == .ready {
+                        LabeledContent {
+                            Button("Sync Now") { sync.syncNow() }
+                        } label: {
+                            if let error = sync.lastError {
+                                Text(error).foregroundStyle(.red)
+                            } else if let date = sync.lastSynced {
+                                Text("Synced \(date.formatted(date: .omitted, time: .shortened))\(sync.lastSource.map { $0 == SettingsSync.deviceName ? "" : " from \($0)" } ?? "")")
+                            } else {
+                                Text("Waiting for iCloud Drive…")
+                            }
                         }
+                        SyncPassphraseForm(mode: .change)
+                    } else if sync.keyState == .waitingForKeyring {
+                        Text("Waiting for iCloud Drive to download the sync keyring…").foregroundStyle(.secondary)
+                    } else if let error = sync.lastError {
+                        Text(error).foregroundStyle(.red)
+                    } else {
+                        SyncPassphraseForm(mode: sync.keyState == .needsPassphrase ? .enter : .create)
+                            .id(sync.keyState == .needsPassphrase)
                     }
                 }
             } header: {
                 Text("iCloud")
             } footer: {
-                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on, and Activity adds up their captures. Your capture history and open at login stay on each Mac.")
+                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on, and Activity adds up their captures. They're encrypted on this Mac with your sync passphrase before they reach iCloud Drive. Your capture history and open at login stay on each Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -475,6 +495,120 @@ struct GeneralSettings: View {
             }
         } message: {
             Text("Shortcuts and options go back to how TextLens started. Your history, where TextLens appears and login stay as they are.")
+        }
+    }
+}
+
+/// Sets up, enters or changes the sync passphrase.
+struct SyncPassphraseForm: View {
+    enum Mode { case create, enter, change, startOver }
+
+    @State var mode: Mode
+    @State private var sync = SettingsSync.shared
+    @State private var passphrase = ""
+    @State private var confirm = ""
+    @State private var working = false
+    @State private var error: String?
+    @State private var changing = false
+    @State private var confirmStartOver = false
+
+    private var needsConfirm: Bool { mode != .enter }
+    private var valid: Bool {
+        mode == .enter ? !passphrase.isEmpty : passphrase.count >= 8 && confirm == passphrase
+    }
+
+    var body: some View {
+        if mode == .change && !changing {
+            LabeledContent("Encrypted with your sync passphrase") {
+                Button("Change Passphrase…") { changing = true }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(prompt).fixedSize(horizontal: false, vertical: true)
+                SecureField("", text: $passphrase, prompt: Text(mode == .enter ? "Passphrase" : "New passphrase"))
+                    .labelsHidden().textFieldStyle(.roundedBorder)
+                    .textContentType(mode == .enter ? .password : .newPassword)
+                    .onSubmit { if valid && !needsConfirm { submit() } }
+                if needsConfirm {
+                    SecureField("", text: $confirm, prompt: Text("Confirm passphrase"))
+                        .labelsHidden().textFieldStyle(.roundedBorder)
+                        .textContentType(.newPassword)
+                        .onSubmit { if valid { submit() } }
+                    if !passphrase.isEmpty && passphrase.count < 8 {
+                        Text("At least 8 characters.").font(.caption).foregroundStyle(.secondary)
+                    } else if !confirm.isEmpty && confirm != passphrase {
+                        Text("The passphrases don't match.").font(.caption).foregroundStyle(.red)
+                    }
+                }
+                if let error { Text(error).font(.callout).foregroundStyle(.red) }
+                HStack {
+                    if mode == .enter {
+                        Button("Forgot It? Start Over…") { confirmStartOver = true }
+                    }
+                    if mode == .change || mode == .startOver {
+                        Button("Cancel") { reset(to: mode == .startOver ? .enter : .change) }
+                    }
+                    Spacer()
+                    if working { ProgressView().controlSize(.small) }
+                    Button(buttonTitle) { submit() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!valid || working)
+                }
+            }
+            .padding(.vertical, 4)
+            .confirmationDialog("Start over with a new passphrase?", isPresented: $confirmStartOver) {
+                Button("Start Over", role: .destructive) { reset(to: .startOver) }
+            } message: {
+                Text("The encrypted settings in iCloud are replaced with this Mac's, and your other Macs will ask for the new passphrase.")
+            }
+        }
+    }
+
+    private var prompt: String {
+        switch mode {
+        case .create: "Choose a sync passphrase. Your settings are encrypted with it before they go to iCloud Drive, and you'll enter the same passphrase on your other Macs. It never leaves your Macs and can't be recovered, so keep it somewhere safe."
+        case .enter: "Your settings in iCloud Drive are encrypted. Enter the sync passphrase you chose on your other Mac."
+        case .change: "Choose a new sync passphrase. Your other Macs keep syncing; you'll only need the new one when you set up another Mac."
+        case .startOver: "Choose a new sync passphrase. Enter it on your other Macs when they ask."
+        }
+    }
+
+    private var buttonTitle: String {
+        switch mode {
+        case .create: "Turn On Encrypted Sync"
+        case .enter: "Unlock"
+        case .change: "Change Passphrase"
+        case .startOver: "Start Over"
+        }
+    }
+
+    private func reset(to newMode: Mode) {
+        mode = newMode
+        passphrase = ""
+        confirm = ""
+        error = nil
+        changing = false
+    }
+
+    private func submit() {
+        guard valid, !working else { return }
+        working = true
+        error = nil
+        let entered = passphrase
+        Task {
+            defer { working = false }
+            do {
+                switch mode {
+                case .create: try await sync.createPassphrase(entered)
+                case .enter: try await sync.enterPassphrase(entered)
+                case .change: try await sync.changePassphrase(entered)
+                case .startOver: try await sync.createPassphrase(entered, replacing: true)
+                }
+                reset(to: .change)
+            } catch {
+                self.error = error.localizedDescription
+                if case SettingsSync.SyncError.alreadySetUp = error { reset(to: .enter); self.error = error.localizedDescription }
+            }
         }
     }
 }

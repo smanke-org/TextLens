@@ -9,8 +9,8 @@ import TextLensKit
 /// Combines the Activity graph's counts from every Mac that shares TextLens settings
 /// through iCloud Drive.
 ///
-/// Each Mac writes only its own file, `iCloud Drive/TextLens/Activity/<device>.json`, and
-/// reads the others'. With one writer per file there are no conflicts to resolve, and the
+/// Each Mac writes only its own file, `iCloud Drive/TextLens/Activity/<device>.tlsync`
+/// (sealed with the sync key, like the settings), and reads the others'. With one writer per file there are no conflicts to resolve, and the
 /// counts are whole-day totals, so reading a file twice never counts anything twice. Only
 /// numbers are shared, never what was captured. Takes part only while settings sync is on;
 /// turning it off removes this Mac's file, so the other Macs stop counting it.
@@ -45,10 +45,8 @@ final class ActivitySync {
 
     // MARK: - What the graph shows
 
-    /// Whether other Macs' counts are combined: settings sync is on and iCloud Drive is there.
-    var isActive: Bool {
-        SettingsSync.shared.isEnabled && SettingsSync.shared.iCloudDriveAvailable
-    }
+    /// Whether other Macs' counts are combined: settings sync is on, unlocked, and iCloud Drive is there.
+    var isActive: Bool { SettingsSync.shared.isReady }
 
     /// The other Macs whose counts are combined; none while sync is off.
     var activeRemotes: [DeviceActivity] {
@@ -68,7 +66,8 @@ final class ActivitySync {
             stop()
             return
         }
-        guard !started else { return }
+        // Waits for the passphrase; nothing goes up unencrypted.
+        guard SettingsSync.shared.key != nil, !started else { return }
         started = true
         publish()
         refresh()
@@ -92,13 +91,18 @@ final class ActivitySync {
         timer = nil
         publishTask?.cancel()
         guard let folder = Self.folder else { return }
-        let url = folder.appending(path: "\(DeviceIdentity.deviceID).json")
+        let id = DeviceIdentity.deviceID
         queue.async {
-            var coordinationError: NSError?
-            NSFileCoordinator().coordinate(writingItemAt: url, options: .forDeleting, error: &coordinationError) { target in
-                try? FileManager.default.removeItem(at: target)
-            }
+            for name in ["\(id).tlsync", "\(id).json"] { SettingsSync.coordinatedDelete(folder.appending(path: name)) }
         }
+    }
+
+    /// This Mac got a sync key (set up, joined, or started over): write this Mac's file
+    /// sealed with it, and read the others' again.
+    func keyDidChange() {
+        guard started else { return start() }
+        publish()
+        refresh()
     }
 
     /// A capture was counted on this Mac. Written a few seconds later, so a burst of
@@ -135,7 +139,7 @@ final class ActivitySync {
 
     /// `waiting` blocks briefly for the write, for quit, where there's no later chance.
     private func publish(waiting: Bool = false) {
-        guard started, let folder = Self.folder else { return }
+        guard started, let folder = Self.folder, let key = SettingsSync.shared.key else { return }
         let done = DispatchSemaphore(value: 0)
         let record = DeviceActivity(deviceID: DeviceIdentity.deviceID, deviceName: DeviceIdentity.deviceName,
                                     updatedAt: Date(), appVersion: AppInfo.version, log: ActivityStore.shared.log)
@@ -143,14 +147,17 @@ final class ActivitySync {
             defer { done.signal() }
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let data = try DeviceActivity.encoder.encode(record)
-                let url = folder.appending(path: "\(record.deviceID).json")
+                let data = try SyncCrypto.seal(DeviceActivity.encoder.encode(record), using: key)
+                let url = folder.appending(path: "\(record.deviceID).tlsync")
                 var coordinationError: NSError?
                 var writeError: Error?
                 NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordinationError) { target in
                     do { try data.write(to: target, options: .atomic) } catch { writeError = error }
                 }
                 if let error = coordinationError ?? writeError { throw error }
+                // The unencrypted file from 1.0.7 and earlier goes once the sealed one is there.
+                let legacy = folder.appending(path: "\(record.deviceID).json")
+                if FileManager.default.fileExists(atPath: legacy.path) { SettingsSync.coordinatedDelete(legacy) }
             } catch {
                 NSLog("TextLens: couldn't share activity through iCloud Drive: \(error.localizedDescription)")
             }
@@ -162,37 +169,53 @@ final class ActivitySync {
     /// Reads the other Macs' files. Off the main thread, since a coordinated read can wait
     /// on iCloud.
     func refresh() {
-        guard started, let folder = Self.folder else { return }
+        guard started, let folder = Self.folder, let key = SettingsSync.shared.key else { return }
         let ownID = DeviceIdentity.deviceID
         queue.async {
             let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
             var fresh: [String: DeviceActivity] = [:]
+            var legacy: [String: DeviceActivity] = [:]
             var downloading = Set<String>()
             for name in names {
                 // iCloud Drive can evict a file to save space, leaving ".<name>.icloud".
                 // Ask for it back and keep the last-known counts meanwhile.
-                if name.hasPrefix("."), name.hasSuffix(".json.icloud") {
+                if name.hasPrefix("."), name.hasSuffix(".icloud") {
                     let real = String(name.dropFirst().dropLast(".icloud".count))
-                    let id = String(real.dropLast(".json".count))
-                    guard id != ownID else { continue }
+                    guard let id = Self.deviceID(fromFileName: real), id != ownID else { continue }
                     try? FileManager.default.startDownloadingUbiquitousItem(at: folder.appending(path: real))
                     downloading.insert(id)
                     continue
                 }
-                guard name.hasSuffix(".json") else { continue }
+                guard let id = Self.deviceID(fromFileName: name), id != ownID else { continue }
                 var data: Data?
                 var coordinationError: NSError?
                 NSFileCoordinator().coordinate(readingItemAt: folder.appending(path: name), options: [], error: &coordinationError) { target in
                     data = try? Data(contentsOf: target)
                 }
-                guard let data, let record = try? DeviceActivity.decoder.decode(DeviceActivity.self, from: data),
-                      record.deviceID != ownID else { continue }
-                fresh[record.deviceID] = record
+                guard let data else { continue }
+                if name.hasSuffix(".tlsync") {
+                    // A file sealed with another key (from before someone started over) is skipped.
+                    guard let plain = try? SyncCrypto.open(data, using: key),
+                          let record = try? DeviceActivity.decoder.decode(DeviceActivity.self, from: plain) else { continue }
+                    fresh[record.deviceID] = record
+                } else if let record = try? DeviceActivity.decoder.decode(DeviceActivity.self, from: data) {
+                    // A Mac still on 1.0.7 or earlier: its counts stay in the graph until it updates.
+                    legacy[record.deviceID] = record
+                }
             }
+            for (id, record) in legacy where fresh[id] == nil { fresh[id] = record }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { ActivitySync.shared.apply(fresh, downloading: downloading) }
             }
         }
+    }
+
+    /// `<device>.tlsync`, or `<device>.json` from 1.0.7 and earlier.
+    nonisolated private static func deviceID(fromFileName name: String) -> String? {
+        for suffix in [".tlsync", ".json"] where name.hasSuffix(suffix) && !name.hasPrefix(".") {
+            return String(name.dropLast(suffix.count))
+        }
+        return nil
     }
 
     private func apply(_ fresh: [String: DeviceActivity], downloading: Set<String>) {
