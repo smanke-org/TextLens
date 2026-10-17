@@ -37,9 +37,13 @@ struct PrivacySettings: View {
             }
             Section {
                 PrivacyPoint("person.crop.circle.badge.xmark", "TextLens has no account, ads, analytics or tracking. No information about you, your captures or how you use TextLens is ever sent to the developer.")
+                #if APPSTORE
+                PrivacyPoint("arrow.down.circle", "TextLens makes no connections of its own. The App Store handles updates.")
+                #else
                 PrivacyPoint("arrow.down.circle", updater.policy == .off
                     ? "Automatic update checks are off, so TextLens connects to the internet only when you choose Check Now."
                     : "The only connection TextLens makes on its own is to GitHub to check for updates. Like any website, GitHub sees your IP address. You can turn update checks off in General.")
+                #endif
             } header: {
                 Text("The developer")
             }

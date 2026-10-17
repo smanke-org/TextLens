@@ -11,7 +11,7 @@ struct ActivitySettings: View {
     @State private var settingsSync = SettingsSync.shared
     @State private var hovered: Date?
     /// Whether the graph shows every Mac or only this one. Kept on each Mac, not synced.
-    @AppStorage("activity.showAllMacs") private var showAllMacs = true
+    @AppStorage("activity.showAllMacs", store: AppDefaults.store) private var showAllMacs = true
 
     /// What counts as a capture: text, codes and translations. Watch alerts happen on their
     /// own, so they're reported beside the graph rather than in it.
@@ -102,12 +102,12 @@ struct ActivitySettings: View {
             Group {
                 if !settingsSync.isEnabled {
                     Text("Turn on “Sync settings with your other Macs” in General to add up captures from every Mac that uses TextLens.")
-                } else if !settingsSync.iCloudDriveAvailable {
-                    Text("Turn on iCloud Drive to add up captures from your other Macs.")
+                } else if !settingsSync.isReady {
+                    Text("Waiting for your sync passphrase in General to add up captures from your other Macs.")
                 } else if remotes.isEmpty {
                     Text("Captures from your other Macs are added here once TextLens on them has settings sync turned on.")
                 } else {
-                    Text("Each Mac's captures since TextLens started counting there. Every Mac with settings sync on is counted, through iCloud Drive › TextLens › Activity. Only the numbers are shared. Deleting a Mac's file there removes it.")
+                    Text("Each Mac's captures since TextLens started counting there. Every Mac with settings sync on is counted. Only the numbers are shared, encrypted like your settings.")
                 }
             }
             .font(.caption).foregroundStyle(.secondary)

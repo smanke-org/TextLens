@@ -107,7 +107,7 @@ final class Preferences {
     /// Puts every setting back to how a new install starts. Where the app appears,
     /// open-at-login and update checks are left alone.
     func resetToDefaults() {
-        for key in Self.keys { UserDefaults.standard.removeObject(forKey: key) }
+        for key in Self.keys { AppDefaults.store.removeObject(forKey: key) }
         load()
         SettingsSync.shared.localDidChange()
     }
@@ -151,7 +151,7 @@ final class Preferences {
     private func load() {
         loading = true
         defer { loading = false }
-        let d = UserDefaults.standard
+        let d = AppDefaults.store
         func double(_ key: String, _ fallback: Double) -> Double { d.object(forKey: key) as? Double ?? fallback }
         func int(_ key: String, _ fallback: Int) -> Int { d.object(forKey: key) as? Int ?? fallback }
         func bool(_ key: String, _ fallback: Bool) -> Bool { d.object(forKey: key) as? Bool ?? fallback }
@@ -214,7 +214,7 @@ final class Preferences {
     /// their current value back when settings arrive from another Mac; counting those as
     /// edits would send the same settings back and forth between Macs forever.
     private func store(_ value: NSObject?, _ key: String) {
-        let defaults = UserDefaults.standard
+        let defaults = AppDefaults.store
         if let old = defaults.object(forKey: key) as? NSObject, let value, old.isEqual(value) { return }
         defaults.set(value, forKey: key)
         SettingsSync.shared.localDidChange()

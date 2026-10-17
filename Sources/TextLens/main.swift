@@ -28,11 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         mainMenu.items.first?.submenu?.insertItem(item("Our other apps…", #selector(showOtherApps)), at: 1)
         NSApp.mainMenu = mainMenu
         // Set at the end of the first launch, so its absence means a brand-new install.
-        let newInstall = !UserDefaults.standard.bool(forKey: "welcomed")
+        let newInstall = !AppDefaults.store.bool(forKey: "welcomed")
         if newInstall { SettingsSync.shared.adoptOnNewInstall() }
         SettingsSync.shared.start()
         ActivitySync.shared.start()
         HistorySync.shared.start()
+        // CloudKit tells the sync engine about other Macs' changes by push.
+        NSApp.registerForRemoteNotifications()
         #if DEBUG
         SyncDebugHook.run()
         #endif
@@ -51,10 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // or joining another Mac): say so where it can be entered, once per version.
         let sync = SettingsSync.shared
         let syncNeedsPassphrase = sync.isEnabled && [.needsPassphrase, .needsNewPassphrase].contains(sync.keyState)
-            && UserDefaults.standard.string(forKey: "sync.passphrasePromptVersion") != AppInfo.version
-        if syncNeedsPassphrase { UserDefaults.standard.set(AppInfo.version, forKey: "sync.passphrasePromptVersion") }
+            && AppDefaults.store.string(forKey: "sync.passphrasePromptVersion") != AppInfo.version
+        if syncNeedsPassphrase { AppDefaults.store.set(AppInfo.version, forKey: "sync.passphrasePromptVersion") }
         if newInstall {
-            UserDefaults.standard.set(true, forKey: "welcomed")
+            AppDefaults.store.set(true, forKey: "welcomed")
             // Ask for Screen Recording up front, so the first capture just works.
             if !ScreenAccess.granted { ScreenAccess.request() }
             SettingsWindow.shared.show(tab: syncNeedsPassphrase ? "General" : nil)
@@ -180,6 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(item("Settings…", #selector(showSettings), key: ","))
+        #if !APPSTORE
         if let staged = AutoUpdater.shared.staged {
             menu.addItem(item("Update to \(staged.version) Now (Otherwise Installs When Idle)", #selector(installUpdateNow)))
         } else if let pending = UpdateAvailability.shared.pending {
@@ -187,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             menu.addItem(item("Check for Updates…", #selector(checkForUpdates)))
         }
+        #endif
         menu.addItem(item("About \(AppInfo.name)", #selector(showAbout)))
         menu.addItem(item("Our other apps…", #selector(showOtherApps)))
         menu.addItem(.separator())

@@ -46,7 +46,7 @@ tracking, and nothing is ever sent to the developer. The only connection it make
 check for updates.
 
 Sync is end-to-end encrypted. With "Sync settings with your other Macs" on, your settings, capture history
-(with its pictures) and capture counts are sealed with AES-256-GCM on your Mac before they reach iCloud Drive,
+(with its pictures) and capture counts are sealed with AES-256-GCM on your Mac before they reach iCloud,
 using a key that only your sync passphrase unlocks. The passphrase never leaves your Macs, so neither Apple nor
 the developer can read what's synced. History sync can be turned off on its own in Settings › History, and
 Settings › Privacy explains all of this in the app.
@@ -58,10 +58,14 @@ automatically when you're not using it, asks first, or doesn't check.
 
 ## Build from source
 
+The Xcode project is generated from `project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Sync uses CloudKit, so builds are signed with a provisioning profile (Xcode signed in to the developer account).
+
 ```bash
+xcodegen generate   # TextLens.xcodeproj: Debug, Release (GitHub) and AppStore (sandboxed) builds
 ./build_app.sh      # universal, Developer ID–signed .build/app/TextLens.app
 ./install.sh        # copy to /Applications and launch
-swift test          # layout, QR, change-detection and history tests
+swift test          # layout, QR, change-detection, history and encryption tests
 ```
 
 Release: `./release.sh X.Y.Z` (notarizes, makes the DMG, tags and publishes the GitHub release).

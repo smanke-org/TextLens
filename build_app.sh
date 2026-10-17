@@ -1,73 +1,56 @@
 #!/bin/bash
-# Assembles and signs TextLens.app: Developer ID, hardened runtime, not sandboxed
-# (it watches input system-wide and draws over every app).
+# Builds the GitHub release of TextLens into .build/app/TextLens.app, ready for
+# ./notarize.sh and ./make_dmg.sh: Developer ID, hardened runtime, not sandboxed (it
+# replaces itself when updating).
 #
-#   ./build_app.sh [signing identity]
+# TextLens syncs through CloudKit, which needs a provisioning profile in the app. So this
+# archives the app, then exports it for Developer ID with automatic signing: Xcode (signed
+# in to the developer account) fetches or renews the Developer ID profile as needed.
+#
+# The sandboxed App Store build is archived from Xcode instead (configuration AppStore).
 set -euo pipefail
+cd "$(dirname "$0")"
 
-APP_NAME="TextLens"
-BUNDLE_ID="com.smanke.TextLens"
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+xcodegen generate >/dev/null
+rm -rf .build/xcode-release .build/app .build/TextLens.xcarchive .build/export
+xcodebuild -project TextLens.xcodeproj -scheme TextLens -configuration Release \
+  -destination 'generic/platform=macOS' -archivePath .build/TextLens.xcarchive \
+  -derivedDataPath .build/xcode-release -allowProvisioningUpdates archive | grep -E "error:|ARCHIVE" || true
+[ -d .build/TextLens.xcarchive ] || { echo "Archive failed." >&2; exit 1; }
 
-IDENTITY="${1:-}"
-BUILD_PATH="$ROOT/.build"
-ENTITLEMENTS="$ROOT/Resources/TextLens.entitlements"
-BUILD="$ROOT/.build/app"
-APP="$BUILD/$APP_NAME.app"
-SWIFT_ARGS=(-c release --arch arm64 --arch x86_64 --build-path "$BUILD_PATH")
+cat > .build/export-options.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>method</key><string>developer-id</string>
+  <key>signingStyle</key><string>automatic</string>
+  <key>teamID</key><string>32CWL275JJ</string>
+</dict></plist>
+PLIST
+xcodebuild -exportArchive -archivePath .build/TextLens.xcarchive -exportPath .build/export \
+  -exportOptionsPlist .build/export-options.plist -allowProvisioningUpdates | grep -E "error:|EXPORT" || true
 
-echo "==> Building universal binary"
-# Delete the old product first: a change that doesn't need relinking (a comment) would
-# otherwise leave an older binary behind and trip the freshness check below.
-rm -f "$(swift build "${SWIFT_ARGS[@]}" --show-bin-path)/$APP_NAME"
-swift build "${SWIFT_ARGS[@]}"
+APP=".build/export/TextLens.app"
+[ -d "$APP" ] || { echo "Export failed." >&2; exit 1; }
+lipo -archs "$APP/Contents/MacOS/TextLens" | grep -q "x86_64 arm64\|arm64 x86_64" || { echo "TextLens isn't universal." >&2; exit 1; }
+ENTITLEMENTS=$(codesign -d --entitlements - --xml "$APP" 2>/dev/null || true)
+case "$ENTITLEMENTS" in
+  *get-task-allow*) echo "The app carries get-task-allow; notarization would reject it." >&2; exit 1 ;;
+esac
+# CloudKit only works with the Developer ID profile inside, pointed at Production.
+[ -f "$APP/Contents/embedded.provisionprofile" ] || { echo "No provisioning profile in the app; CloudKit won't work." >&2; exit 1; }
+# (plutil can't be used here: it reads the dots in the key as a path.)
+case "$ENTITLEMENTS" in
+  *"<key>com.apple.developer.icloud-container-environment</key><string>Production</string>"*) ;;
+  *) echo "The app isn't set to CloudKit's Production environment." >&2; exit 1 ;;
+esac
+# The GitHub build must stay unsandboxed: the updater replaces the app in place.
+case "$ENTITLEMENTS" in
+  *"<key>com.apple.security.app-sandbox</key><true/>"*) echo "The GitHub build is sandboxed; its updater wouldn't work." >&2; exit 1 ;;
+esac
 
-# Ask SwiftPM where it put the binary rather than assuming: the location has moved
-# between toolchains, and a hardcoded path once packaged a days-old binary inside a
-# freshly versioned bundle. Then refuse to package it if any source is newer.
-BIN_DIR="$(swift build "${SWIFT_ARGS[@]}" --show-bin-path)"
-if [ ! -x "$BIN_DIR/$APP_NAME" ]; then
-  echo "No built binary at $BIN_DIR/$APP_NAME." >&2
-  exit 1
-fi
-NEWER_SOURCE=$(find "$ROOT/Sources" "$ROOT/Package.swift" -newer "$BIN_DIR/$APP_NAME" -type f -print -quit)
-if [ -n "$NEWER_SOURCE" ]; then
-  echo "$BIN_DIR/$APP_NAME is older than $NEWER_SOURCE — refusing to package a stale binary." >&2
-  exit 1
-fi
-echo "    using $BIN_DIR"
-
-echo "==> Assembling bundle"
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN_DIR/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
-cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
-[ -f "$ROOT/Resources/AppIcon.icns" ] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-
-VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
-
-echo "==> Resolving signing identity"
-if [ -z "$IDENTITY" ]; then
-  FOUND=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -1 || true)
-  if [ -z "$FOUND" ]; then
-    echo "No Developer ID Application identity found in the keychain." >&2
-    exit 1
-  fi
-  IDENTITY=$(echo "$FOUND" | sed -E 's/.*"(.*)"$/\1/')
-fi
-echo "    $IDENTITY"
-
-echo "==> Signing"
-# Keep the .entitlements files free of XML comments: plutil accepts them, but codesign's
-# AMFI parser rejects the file ("syntax error near line 5").
-codesign --force --options runtime --timestamp \
-  --identifier "$BUNDLE_ID" \
-  --entitlements "$ENTITLEMENTS" \
-  --sign "$IDENTITY" \
-  "$APP"
-
-echo "==> Verifying"
-codesign --verify --deep --strict --verbose=2 "$APP"
-
-echo
-echo "Built $APP ($VERSION)"
+mkdir -p .build/app
+ditto "$APP" .build/app/TextLens.app
+codesign --verify --deep --strict .build/app/TextLens.app
+codesign -dvv .build/app/TextLens.app 2>&1 | grep -E "^Authority=Developer ID|^Timestamp="
+echo "Built .build/app/TextLens.app ($(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' .build/app/TextLens.app/Contents/Info.plist))"

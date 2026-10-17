@@ -4,19 +4,18 @@ import Foundation
 import Observation
 import TextLensKit
 
-/// Keeps settings in step across the Macs on one iCloud account, through a file in
-/// iCloud Drive (`iCloud Drive/TextLens/Settings.tlsync`). Whole-document,
-/// last-writer-wins: each change rewrites the file, and a newer file written by another
-/// Mac replaces this Mac's settings.
+/// Keeps settings in step across the Macs on one iCloud account, through the Settings
+/// record in CloudKit (see `CloudSync`). Whole-document, last-writer-wins: each change
+/// replaces the record, and a newer one written by another Mac replaces this Mac's settings.
 ///
-/// End-to-end encrypted (1.0.8 and later): every file TextLens puts in iCloud Drive is
-/// sealed with AES-256-GCM under a random data key. iCloud holds that key only wrapped by
-/// the sync passphrase (`Keyring.json`, see `SyncCrypto`); each Mac keeps the unwrapped key
-/// in its login keychain. Until this Mac has the key, nothing is read or written.
+/// End-to-end encrypted: every record TextLens puts in iCloud is sealed with AES-256-GCM
+/// under a random data key. iCloud holds that key only wrapped by the sync passphrase (the
+/// Keyring record, see `SyncCrypto`); each Mac keeps the unwrapped key in its login
+/// keychain. Until this Mac has the key, the sync engine doesn't run.
 ///
-/// A plain file needs no iCloud entitlement or provisioning profile, which works only
-/// because the app is not sandboxed. Left on each Mac: open at login (a per-Mac login
-/// item) and the capture history, which can hold anything that was on screen.
+/// 1.0.8 and 1.0.9 synced through files in iCloud Drive instead. The GitHub build (not
+/// sandboxed) still reads that keyring once, so a Mac moves over without the passphrase,
+/// and removes the old files two weeks later. Left on each Mac: open at login.
 @Observable
 @MainActor
 final class SettingsSync {
@@ -33,9 +32,9 @@ final class SettingsSync {
                 start()
             } else {
                 stop()
+                ActivitySync.shared.start()
+                HistorySync.shared.start()
             }
-            ActivitySync.shared.start()
-            HistorySync.shared.start()
         }
     }
     private(set) var lastSynced: Date?
@@ -44,19 +43,23 @@ final class SettingsSync {
 
     /// What sync needs before it can run.
     enum KeyState: Equatable {
-        /// This Mac holds the key that opens the synced files.
+        /// This Mac holds the key that opens the synced records.
         case ready
         /// Nothing is set up in iCloud yet: choose a passphrase.
         case needsNewPassphrase
         /// Another Mac set up encryption: enter its passphrase.
         case needsPassphrase
-        /// iCloud Drive hasn't downloaded the keyring yet.
+        /// Still asking iCloud for the keyring (or it can't be reached).
         case waitingForKeyring
     }
-    private(set) var keyState: KeyState = .needsNewPassphrase
+    private(set) var keyState: KeyState = .waitingForKeyring
 
-    /// The data key, once this Mac has it. Read by `ActivitySync` too.
+    /// The data key, once this Mac has it. Read by `ActivitySync`, `HistorySync` and `CloudSync`.
     @ObservationIgnored private(set) var key: SymmetricKey?
+    /// The keyring as known in iCloud (or, moving over from iCloud Drive, the legacy one).
+    @ObservationIgnored private var keyring: SyncCrypto.Keyring?
+    /// The keyring to save in iCloud on the next send (a changed passphrase).
+    @ObservationIgnored private(set) var keyringForUpload: SyncCrypto.Keyring?
 
     /// When settings last changed on this Mac, or were adopted from iCloud.
     private var localModified: Date? {
@@ -64,17 +67,17 @@ final class SettingsSync {
         set { defaults.set(newValue, forKey: Keys.localModified) }
     }
 
-    private let defaults = UserDefaults.standard
+    private let defaults = AppDefaults.store
     private var applying = false
-    private var started = false
-    private var writeTask: Task<Void, Never>?
-    private var timer: Timer?
-    private var keyringTimer: Timer?
-    private var lastSeenFileDate: Date?
+    private var checking = false
+    /// Whether the Settings record came down since the engine last started.
+    private var settingsSeenThisRun = false
+    private var retryTimer: Timer?
 
     private enum Keys {
         static let enabled = "sync.enabled"
         static let localModified = "sync.localModified"
+        static let legacyMovedAt = "sync.legacyMovedAt"
     }
 
     /// Settings that follow the user between Macs.
@@ -82,24 +85,7 @@ final class SettingsSync {
         Preferences.keys + ["showInDock", "showInMenuBar", UpdatePolicy.key]
     }
 
-    nonisolated static var iCloudDrive: URL {
-        if let override = ProcessInfo.processInfo.environment["TEXTLENS_SYNC_FOLDER"] {
-            return URL(fileURLWithPath: override)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library/Mobile Documents/com~apple~CloudDocs")
-    }
-    nonisolated static var folder: URL { iCloudDrive.appending(path: "TextLens") }
-    nonisolated static var file: URL { folder.appending(path: "Settings.tlsync") }
-    nonisolated static var keyringFile: URL { folder.appending(path: "Keyring.json") }
-    /// Where 1.0.7 and earlier kept settings, unencrypted. Removed once this Mac writes the
-    /// encrypted file, and never read.
-    nonisolated static var legacyFile: URL { folder.appending(path: "Settings.plist") }
-
-    var iCloudDriveAvailable: Bool {
-        FileManager.default.fileExists(atPath: Self.iCloudDrive.path)
-    }
-
-    var isReady: Bool { isEnabled && keyState == .ready && iCloudDriveAvailable }
+    var isReady: Bool { isEnabled && keyState == .ready && key != nil }
 
     /// Must not touch Preferences: its initializer can report changes here.
     private init() {
@@ -109,126 +95,159 @@ final class SettingsSync {
 
     // MARK: - Lifecycle
 
-    /// On a brand-new install, sync files already in iCloud Drive mean this user has
-    /// TextLens on another Mac: turn sync on (it then asks for the passphrase) rather than
-    /// starting from the defaults.
+    /// On a brand-new install, sync data already in iCloud means this user has TextLens on
+    /// another Mac: turn sync on (it then asks for the passphrase) rather than starting from
+    /// the defaults.
     func adoptOnNewInstall() {
-        let fm = FileManager.default
-        guard !isEnabled, [Self.keyringFile, Self.file, Self.legacyFile].contains(where: { fm.fileExists(atPath: $0.path) })
-                || fm.fileExists(atPath: Self.placeholder(for: Self.keyringFile).path) else { return }
-        NSLog("TextLens: new install found settings in iCloud Drive; turning sync on")
-        isEnabled = true
+        guard !isEnabled else { return }
+        Task {
+            let found = (try? await CloudSync.shared.fetchKeyring()) != nil || LegacySync.keyring() != nil
+            guard found, !isEnabled else { return }
+            NSLog("TextLens: new install found sync data in iCloud; turning sync on")
+            isEnabled = true
+        }
     }
 
     func start() {
-        guard isEnabled, !started else { return }
-        guard iCloudDriveAvailable else {
-            lastError = "iCloud Drive isn't turned on for this Mac. Turn it on in System Settings › Apple Account › iCloud."
-            return
-        }
+        guard isEnabled, !checking else { return }
+        checking = true
         lastError = nil
-        refreshKeyState()
-        guard keyState == .ready else {
-            // Look again now and then: the keyring may still be downloading, or another
-            // Mac may start over with a new one.
-            if keyringTimer == nil {
-                keyringTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
-                    MainActor.assumeIsolated { SettingsSync.shared.recheckKeyring() }
+        Task {
+            await refreshKeyState()
+            checking = false
+            if keyState == .ready, let key {
+                retryTimer?.invalidate()
+                retryTimer = nil
+                CloudSync.shared.startEngine(keyID: SyncCrypto.keyID(for: key))
+                afterEngineStart()
+            } else if retryTimer == nil {
+                // Look again now and then: iCloud may come back, or another Mac may finish
+                // setting up.
+                retryTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+                    MainActor.assumeIsolated {
+                        let sync = SettingsSync.shared
+                        if sync.isEnabled, !CloudSync.shared.isRunning { sync.start() } else { sync.retryTimer?.invalidate(); sync.retryTimer = nil }
+                    }
                 }
             }
-            return
         }
-        keyringTimer?.invalidate()
-        keyringTimer = nil
-        started = true
-        pull()
-        // iCloud delivers other Macs' edits in the background; look for them periodically.
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in
-            MainActor.assumeIsolated { SettingsSync.shared.checkForRemoteChange() }
-        }
-        ActivitySync.shared.start()
     }
 
     private func stop() {
-        started = false
-        timer?.invalidate()
-        timer = nil
-        keyringTimer?.invalidate()
-        keyringTimer = nil
-        writeTask?.cancel()
+        retryTimer?.invalidate()
+        retryTimer = nil
+        CloudSync.shared.stopEngine()
         lastError = nil
     }
 
     func syncNow() {
         guard isEnabled else { return }
-        if !started { start() } else { pull() }
+        if CloudSync.shared.isRunning { CloudSync.shared.fetchNow(); CloudSync.shared.sendNow() } else { start() }
     }
 
     /// Called whenever a synced setting really changes on this Mac.
     func localDidChange() {
         guard !applying else { return }
         localModified = Self.now
-        guard started else { return }
-        writeTask?.cancel()
-        // Debounced, so dragging a slider writes once rather than for every step.
-        writeTask = Task {
-            try? await Task.sleep(for: .seconds(1.5))
-            guard !Task.isCancelled else { return }
-            write()
+        if CloudSync.shared.isRunning { CloudSync.shared.queueSave([CloudSync.Name.settings]) }
+    }
+
+    private func afterEngineStart() {
+        // If nothing came down from iCloud, this Mac's settings become the shared copy.
+        settingsSeenThisRun = false
+        CloudSync.shared.afterFirstFetch { [weak self] in
+            guard let self, !self.settingsSeenThisRun, !CloudSync.shared.knowsServerRecord(CloudSync.Name.settings) else { return }
+            CloudSync.shared.queueSave([CloudSync.Name.settings])
+        }
+        LegacySync.cleanUpIfDue(movedAt: defaults.object(forKey: Keys.legacyMovedAt) as? Date) { [defaults] in
+            defaults.set(Date(), forKey: Keys.legacyMovedAt)
         }
     }
 
     // MARK: - Passphrase and key
 
-    /// Works out whether this Mac's key still opens what's in iCloud.
-    private func refreshKeyState() {
-        let fm = FileManager.default
-        if let keyring = readKeyring() {
-            if let key, SyncCrypto.keyID(for: key) == keyring.keyID {
+    /// Works out whether this Mac's key opens what's in iCloud.
+    private func refreshKeyState() async {
+        if let problem = await CloudSync.shared.accountProblem() {
+            lastError = problem
+            keyState = .waitingForKeyring
+            return
+        }
+        let remote: SyncCrypto.Keyring?
+        do {
+            remote = try await CloudSync.shared.fetchKeyring()
+        } catch {
+            lastError = "Couldn't reach iCloud: \(error.localizedDescription)"
+            keyState = .waitingForKeyring
+            return
+        }
+        lastError = nil
+        if let remote {
+            keyring = remote
+            if let key, SyncCrypto.keyID(for: key) == remote.keyID {
                 keyState = .ready
             } else {
                 // No key yet, or another Mac started over with a new passphrase.
                 if key != nil { forgetKey() }
                 keyState = .needsPassphrase
             }
-        } else if fm.fileExists(atPath: Self.placeholder(for: Self.keyringFile).path) {
-            try? fm.startDownloadingUbiquitousItem(at: Self.keyringFile)
-            keyState = .waitingForKeyring
-        } else {
-            // Nothing in iCloud. A key this Mac already holds keeps working (its keyring may
-            // simply not have arrived); otherwise set one up.
-            keyState = key == nil ? .needsNewPassphrase : .ready
+            return
         }
+        // Nothing in CloudKit. Moving over from iCloud Drive (1.0.8 and 1.0.9)?
+        DebugLog.write("no CloudKit keyring")
+        if let legacy = LegacySync.keyring() {
+            keyring = legacy
+            if let key, SyncCrypto.keyID(for: key) == legacy.keyID {
+                // Same key and passphrase: bring the keyring across, no questions asked.
+                do {
+                    try await CloudSync.shared.saveKeyring(legacy, replacing: false)
+                    defaults.set(Date(), forKey: Keys.legacyMovedAt)
+                    NSLog("TextLens: moved the sync keyring from iCloud Drive to CloudKit")
+                    keyState = .ready
+                } catch SyncError.alreadySetUp {
+                    return await refreshKeyState()
+                } catch {
+                    lastError = "Couldn't reach iCloud: \(error.localizedDescription)"
+                    keyState = .waitingForKeyring
+                }
+            } else {
+                keyState = .needsPassphrase
+            }
+            return
+        }
+        keyring = nil
+        if key != nil { forgetKey() }
+        keyState = .needsNewPassphrase
     }
 
-    private func recheckKeyring() {
-        guard isEnabled, !started else { keyringTimer?.invalidate(); keyringTimer = nil; return }
-        let before = keyState
-        refreshKeyState()
-        if keyState == .ready { start() } else if keyState != before { lastError = nil }
-    }
-
-    /// Sets up encryption with a new passphrase: a fresh key, wrapped into Keyring.json.
-    /// `replacing` starts over, removing files sealed with an old key nobody can open.
+    /// Sets up encryption with a new passphrase: a fresh key, wrapped into the keyring.
+    /// `replacing` starts over, removing everything sealed with the old key.
     func createPassphrase(_ passphrase: String, replacing: Bool = false) async throws {
-        if !replacing, readKeyring() != nil {
+        let (newKeyring, newKey) = try await Task.detached { try SyncCrypto.createKeyring(passphrase: passphrase) }.value
+        do {
+            try await CloudSync.shared.saveKeyring(newKeyring, replacing: replacing)
+        } catch SyncError.alreadySetUp {
             // Another Mac set up encryption meanwhile: join it instead.
-            refreshKeyState()
+            await refreshKeyState()
             throw SyncError.alreadySetUp
         }
-        let (keyring, newKey) = try await Task.detached { try SyncCrypto.createKeyring(passphrase: passphrase) }.value
-        if replacing { removeSealedFiles() }
-        try writeKeyring(keyring)
-        adopt(newKey)
+        keyring = newKeyring
         // This Mac's settings become the shared copy.
         localModified = localModified ?? Self.now
-        NSLog("TextLens: set up encrypted sync (key \(keyring.keyID))")
+        adopt(newKey)
+        NSLog("TextLens: set up encrypted sync (key \(newKeyring.keyID))")
     }
 
     /// Unlocks the key another Mac set up. Throws `SyncCrypto.CryptoError.wrongPassphrase`.
     func enterPassphrase(_ passphrase: String) async throws {
-        guard let keyring = readKeyring() else { throw SyncError.noKeyring }
+        if keyring == nil { await refreshKeyState() }
+        guard let keyring else { throw SyncError.noKeyring }
         let unlocked = try await Task.detached { try SyncCrypto.unwrap(keyring, passphrase: passphrase) }.value
+        if (try? await CloudSync.shared.fetchKeyring()) == nil {
+            // The legacy iCloud Drive keyring: CloudKit gets it now.
+            try await CloudSync.shared.saveKeyring(keyring, replacing: false)
+            defaults.set(Date(), forKey: Keys.legacyMovedAt)
+        }
         // Adopt what the other Macs share rather than overwriting it.
         localModified = nil
         adopt(unlocked)
@@ -237,8 +256,9 @@ final class SettingsSync {
     /// Rewraps the same key with a new passphrase, so other Macs keep working.
     func changePassphrase(_ passphrase: String) async throws {
         guard let key else { throw SyncError.noKeyring }
-        let keyring = try await Task.detached { try SyncCrypto.wrap(key, passphrase: passphrase) }.value
-        try writeKeyring(keyring)
+        let rewrapped = try await Task.detached { try SyncCrypto.wrap(key, passphrase: passphrase) }.value
+        try await CloudSync.shared.saveKeyring(rewrapped, replacing: false)
+        keyring = rewrapped
     }
 
     private func adopt(_ newKey: SymmetricKey) {
@@ -246,11 +266,9 @@ final class SettingsSync {
         SyncKeychain.saveKey(newKey)
         keyState = .ready
         lastError = nil
-        started = false
-        timer?.invalidate()
-        start()
-        ActivitySync.shared.keyDidChange()
-        HistorySync.shared.start()
+        CloudSync.shared.stopEngine()
+        CloudSync.shared.startEngine(keyID: SyncCrypto.keyID(for: newKey))
+        afterEngineStart()
     }
 
     private func forgetKey() {
@@ -262,53 +280,86 @@ final class SettingsSync {
         case noKeyring, alreadySetUp
         var errorDescription: String? {
             switch self {
-            case .noKeyring: "The sync keyring isn't in iCloud Drive yet. Try again in a moment."
+            case .noKeyring: "The sync keyring isn't in iCloud yet. Try again in a moment."
             case .alreadySetUp: "Another Mac has just set up encrypted sync. Enter the passphrase you chose there."
             }
         }
     }
 
-    private func readKeyring() -> SyncCrypto.Keyring? {
-        guard FileManager.default.fileExists(atPath: Self.keyringFile.path) else { return nil }
-        var keyring: SyncCrypto.Keyring?
-        var coordinationError: NSError?
-        NSFileCoordinator().coordinate(readingItemAt: Self.keyringFile, options: [], error: &coordinationError) { url in
-            if let data = try? Data(contentsOf: url) { keyring = try? Self.keyringDecoder.decode(SyncCrypto.Keyring.self, from: data) }
-        }
-        return keyring
+    // MARK: - From CloudSync
+
+    /// The keyring record arrived or changed. A different key means another Mac started over.
+    func receivedKeyring(_ incoming: SyncCrypto.Keyring) {
+        keyring = incoming
+        guard let key, SyncCrypto.keyID(for: key) != incoming.keyID else { return }
+        NSLog("TextLens: the sync key changed on another Mac")
+        CloudSync.shared.resetEngine()
+        forgetKey()
+        keyState = .needsPassphrase
     }
 
-    private func writeKeyring(_ keyring: SyncCrypto.Keyring) throws {
-        let data = try Self.keyringEncoder.encode(keyring)
-        try coordinatedWrite(data, to: Self.keyringFile)
-    }
-
-    /// Settings, every Mac's activity file and the synced history, after starting over
-    /// with a new key.
-    private func removeSealedFiles() {
-        var targets = [Self.file]
-        for sub in ["Activity", "History"] {
-            let folder = Self.folder.appending(path: sub)
-            if let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) {
-                targets += names.filter { $0.contains(".tlsync") }.map { folder.appending(path: $0) }
+    /// Checks the keyring in iCloud still matches this Mac's key.
+    func verifyKeyring() {
+        Task {
+            do {
+                if let remote = try await CloudSync.shared.fetchKeyring() {
+                    receivedKeyring(remote)
+                } else {
+                    keyringChangedElsewhere()
+                }
+            } catch {
+                DebugLog.write("verifyKeyring: \(error)")
             }
         }
-        targets.forEach(Self.coordinatedDelete)
     }
 
-    private static let keyringEncoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }()
-    private static let keyringDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
+    /// The zone or keyring went away: someone started over or deleted the synced data.
+    func keyringChangedElsewhere() {
+        CloudSync.shared.stopEngine()
+        start()
+    }
 
-    // MARK: - Reading and writing
+    /// Signed out of iCloud, or into another account.
+    func accountChanged() {
+        forgetKey()
+        keyring = nil
+        keyState = .waitingForKeyring
+        start()
+    }
+
+    /// The Settings record arrived from iCloud (or won a conflict with this Mac's save).
+    func receivedSettings(_ sealed: Data, conflict: Bool = false) {
+        guard let key, let remote = Self.document(from: sealed, key: key) else {
+            lastError = "The settings in iCloud couldn't be opened with this Mac's key."
+            return
+        }
+        settingsSeenThisRun = true
+        if let local = localModified, local > remote.updatedAt {
+            CloudSync.shared.queueSave([CloudSync.Name.settings])
+        } else if localModified == nil || remote.updatedAt > localModified! {
+            apply(remote)
+        } else {
+            // The same settings: nothing to do.
+            noteSynced(remote)
+        }
+    }
+
+    /// The Settings record's contents: the whole set, defaults included (see Preferences.snapshot).
+    func sealedSettings(using key: SymmetricKey) -> Data? {
+        let updatedAt = localModified ?? Self.now
+        var settings = Preferences.shared.snapshot.filter { Self.syncedKeys.contains($0.key) }
+        settings["showInDock"] = AppPresence.showInDock
+        settings["showInMenuBar"] = AppPresence.showInMenuBar
+        settings[UpdatePolicy.key] = UpdatePolicy.current.rawValue
+        let plist: [String: Any] = ["version": 3, "updatedAt": updatedAt, "updatedBy": Self.deviceName, "settings": settings]
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0),
+              let sealed = try? SyncCrypto.seal(data, using: key) else { return nil }
+        if localModified == nil { localModified = updatedAt }
+        noteSynced(Document(updatedAt: updatedAt, updatedBy: Self.deviceName, settings: settings))
+        return sealed
+    }
+
+    // MARK: - Applying
 
     private struct Document {
         var updatedAt: Date
@@ -316,115 +367,18 @@ final class SettingsSync {
         var settings: [String: Any]
     }
 
-    private func checkForRemoteChange() {
-        guard started else { return }
-        // Another Mac may have started over with a new passphrase.
-        refreshKeyState()
-        guard keyState == .ready else {
-            stop()
-            start()
-            HistorySync.shared.start()
-            return
-        }
-        let date = (try? Self.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        if date != lastSeenFileDate { pull() }
-    }
-
-    private func pull() {
-        guard let remote = readRemote() else {
-            // Nothing in iCloud yet: this Mac's settings become the shared copy.
-            if lastError == nil { write() }
-            return
-        }
-        if let local = localModified, local > remote.updatedAt {
-            write()
-        } else if localModified == nil || remote.updatedAt > localModified! {
-            apply(remote)
-        } else {
-            noteSynced(remote)
-        }
-    }
-
-    private func readRemote() -> Document? {
-        guard let key else { return nil }
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: Self.file.path) else {
-            if fm.fileExists(atPath: Self.placeholder(for: Self.file).path) {
-                try? fm.startDownloadingUbiquitousItem(at: Self.file)
-                lastError = "Waiting for iCloud Drive to download your settings…"
-            }
-            return nil
-        }
-        var result: Document?
-        var coordinationError: NSError?
-        NSFileCoordinator().coordinate(readingItemAt: Self.file, options: [], error: &coordinationError) { url in
-            guard let sealed = try? Data(contentsOf: url),
-                  let data = try? SyncCrypto.open(sealed, using: key),
-                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-                  let updatedAt = plist["updatedAt"] as? Date,
-                  let settings = plist["settings"] as? [String: Any]
-            else {
-                lastError = "The settings in iCloud Drive couldn't be opened with this Mac's key."
-                return
-            }
-            result = Document(updatedAt: updatedAt, updatedBy: plist["updatedBy"] as? String ?? "another Mac", settings: settings)
-            lastError = nil
-        }
-        if let coordinationError { lastError = coordinationError.localizedDescription }
-        lastSeenFileDate = (try? Self.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        return result
-    }
-
-    private func write() {
-        guard isEnabled, iCloudDriveAvailable, let key else { return }
-        let updatedAt = localModified ?? Self.now
-        // The whole set, defaults included (see Preferences.snapshot).
-        var settings = Preferences.shared.snapshot.filter { Self.syncedKeys.contains($0.key) }
-        settings["showInDock"] = AppPresence.showInDock
-        settings["showInMenuBar"] = AppPresence.showInMenuBar
-        settings[UpdatePolicy.key] = UpdatePolicy.current.rawValue
-        let plist: [String: Any] = ["version": 2, "updatedAt": updatedAt, "updatedBy": Self.deviceName, "settings": settings]
-        do {
-            let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)
-            try coordinatedWrite(try SyncCrypto.seal(data, using: key), to: Self.file)
-            if localModified == nil { localModified = updatedAt }
-            lastSeenFileDate = (try? Self.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            noteSynced(Document(updatedAt: updatedAt, updatedBy: Self.deviceName, settings: settings))
-            // The unencrypted copy from 1.0.7 and earlier goes once the encrypted one is there.
-            if FileManager.default.fileExists(atPath: Self.legacyFile.path) { Self.coordinatedDelete(Self.legacyFile) }
-        } catch {
-            lastError = "Settings couldn't be saved to iCloud Drive: \(error.localizedDescription)"
-        }
-    }
-
-    private func coordinatedWrite(_ data: Data, to target: URL) throws {
-        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-        var coordinationError: NSError?
-        var writeError: Error?
-        NSFileCoordinator().coordinate(writingItemAt: target, options: .forReplacing, error: &coordinationError) { url in
-            do { try data.write(to: url, options: .atomic) } catch { writeError = error }
-        }
-        if let error = coordinationError ?? writeError { throw error }
-    }
-
-    nonisolated static func coordinatedDelete(_ target: URL) {
-        var coordinationError: NSError?
-        NSFileCoordinator().coordinate(writingItemAt: target, options: .forDeleting, error: &coordinationError) { url in
-            try? FileManager.default.removeItem(at: url)
-        }
-    }
-
-    /// iCloud Drive can evict a file to save space, leaving ".<name>.icloud" in its place.
-    nonisolated static func placeholder(for url: URL) -> URL {
-        url.deletingLastPathComponent().appending(path: ".\(url.lastPathComponent).icloud")
+    private static func document(from sealed: Data, key: SymmetricKey) -> Document? {
+        guard let data = try? SyncCrypto.open(sealed, using: key),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let updatedAt = plist["updatedAt"] as? Date,
+              let settings = plist["settings"] as? [String: Any] else { return nil }
+        return Document(updatedAt: updatedAt, updatedBy: plist["updatedBy"] as? String ?? "another Mac", settings: settings)
     }
 
     private func apply(_ remote: Document) {
         applying = true
         defer { applying = false }
-        // Only what the file holds. Files written before 1.5.1 left out settings at their
-        // defaults; treating a missing setting as "reset it" wiped out this Mac's choices,
-        // so a missing setting now keeps this Mac's value.
+        // Only what the record holds; a missing setting keeps this Mac's value.
         for key in Self.syncedKeys {
             if let value = remote.settings[key] { defaults.set(value, forKey: key) }
         }
@@ -443,7 +397,7 @@ final class SettingsSync {
         lastError = nil
     }
 
-    /// Whole seconds, so a date read back from the file compares equal to the one written.
+    /// Whole seconds, so a date read back compares equal to the one written.
     private static var now: Date {
         Date(timeIntervalSinceReferenceDate: Date().timeIntervalSinceReferenceDate.rounded(.down))
     }
@@ -453,14 +407,64 @@ final class SettingsSync {
     }
 }
 
+/// Sync through iCloud Drive files, as 1.0.8 and 1.0.9 did: only read to move over, then
+/// removed. The App Store build is sandboxed and can't see iCloud Drive, so it starts fresh.
+enum LegacySync {
+    nonisolated static var folder: URL {
+        if let override = ProcessInfo.processInfo.environment["TEXTLENS_SYNC_FOLDER"] {
+            return URL(fileURLWithPath: override).appending(path: "TextLens")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Mobile Documents/com~apple~CloudDocs/TextLens")
+    }
+
+    /// The iCloud Drive keyring, if there is one.
+    @MainActor static func keyring() -> SyncCrypto.Keyring? {
+        #if APPSTORE
+        return nil
+        #else
+        let url = folder.appending(path: "Keyring.json")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            // Evicted to save space: ask for it back for next time.
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+            return nil
+        }
+        var keyring: SyncCrypto.Keyring?
+        var coordinationError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { target in
+            if let data = try? Data(contentsOf: target) {
+                keyring = try? CloudSync.keyringDecoder.decode(SyncCrypto.Keyring.self, from: data)
+            }
+        }
+        return keyring
+        #endif
+    }
+
+    /// Two weeks after a Mac moved to CloudKit (time for the others to update), the old
+    /// iCloud Drive folder goes.
+    static func cleanUpIfDue(movedAt: Date?, markMoved: () -> Void) {
+        #if !APPSTORE
+        guard FileManager.default.fileExists(atPath: folder.path) else { return }
+        DebugLog.write("legacy cleanup check, moved \(String(describing: movedAt))")
+        guard let movedAt else { return markMoved() }
+        guard Date().timeIntervalSince(movedAt) > 14 * 86_400 else { return }
+        let target = folder
+        DispatchQueue.global(qos: .utility).async {
+            var coordinationError: NSError?
+            NSFileCoordinator().coordinate(writingItemAt: target, options: .forDeleting, error: &coordinationError) { url in
+                try? FileManager.default.removeItem(at: url)
+            }
+            NSLog("TextLens: removed the old iCloud Drive sync folder")
+        }
+        #endif
+    }
+}
+
 /// The sync data key, kept in this Mac's login keychain.
 enum SyncKeychain {
     static let service = "com.smanke.TextLens.sync"
-    /// A test run pointed at its own sync folder keeps its key apart from the real one.
-    static let account: String = {
-        guard let folder = ProcessInfo.processInfo.environment["TEXTLENS_SYNC_FOLDER"] else { return "data-key" }
-        return "data-key-test-" + SyncCrypto.sha256Hex(Data((folder + (Bundle.main.bundleIdentifier ?? "")).utf8)).prefix(8)
-    }()
+    /// A test copy with its own defaults keeps its key apart from the real one.
+    static let account: String = AppDefaults.suiteName.map { "data-key-test-\($0)" } ?? "data-key"
 
     static func saveKey(_ key: SymmetricKey) {
         deleteKey()
@@ -515,9 +519,9 @@ enum SyncDebugHook {
                     case "startover": try await sync.createPassphrase(pass, replacing: true)
                     default: break
                     }
-                    UserDefaults.standard.set("ok", forKey: "debug.syncCommand")
+                    AppDefaults.store.set("ok", forKey: "debug.syncCommand")
                 } catch {
-                    UserDefaults.standard.set("error: \(error.localizedDescription)", forKey: "debug.syncCommand")
+                    AppDefaults.store.set("error: \(error.localizedDescription)", forKey: "debug.syncCommand")
                 }
             }
         }
@@ -535,12 +539,14 @@ enum SyncDebugHook {
                     store.togglePin(first.id)
                 } else if command == "delete-first", let first = store.entries.first {
                     store.delete([first.id])
+                } else if command.hasPrefix("words:") {
+                    Preferences.shared.customWords = String(command.dropFirst(6))
                 }
             }
         }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             MainActor.assumeIsolated {
-                let d = UserDefaults.standard
+                let d = AppDefaults.store
                 let store = HistoryStore.shared
                 d.set(store.entries.count, forKey: "debug.historyCount")
                 d.set(store.entries.filter(\.pinned).count, forKey: "debug.historyPinned")

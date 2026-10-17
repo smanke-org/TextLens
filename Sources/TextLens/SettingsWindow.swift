@@ -357,7 +357,7 @@ struct HistorySettings: View {
                             } else if let date = historySync.lastSynced {
                                 Text("Synced \(date.formatted(date: .omitted, time: .shortened))")
                             } else {
-                                Text("Waiting for iCloud Drive…")
+                                Text("Waiting for iCloud…")
                             }
                         }
                     }
@@ -463,14 +463,14 @@ struct GeneralSettings: View {
                             } else if let date = sync.lastSynced {
                                 Text("Synced \(date.formatted(date: .omitted, time: .shortened))\(sync.lastSource.map { $0 == SettingsSync.deviceName ? "" : " from \($0)" } ?? "")")
                             } else {
-                                Text("Waiting for iCloud Drive…")
+                                Text("Waiting for iCloud…")
                             }
                         }
                         SyncPassphraseForm(mode: .change)
-                    } else if sync.keyState == .waitingForKeyring {
-                        Text("Waiting for iCloud Drive to download the sync keyring…").foregroundStyle(.secondary)
                     } else if let error = sync.lastError {
                         Text(error).foregroundStyle(.red)
+                    } else if sync.keyState == .waitingForKeyring {
+                        Text("Checking iCloud…").foregroundStyle(.secondary)
                     } else {
                         SyncPassphraseForm(mode: sync.keyState == .needsPassphrase ? .enter : .create)
                             .id(sync.keyState == .needsPassphrase)
@@ -479,9 +479,10 @@ struct GeneralSettings: View {
             } header: {
                 Text("iCloud")
             } footer: {
-                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on, and Activity adds up their captures. Your capture history comes along too unless you turn that off in History. Everything is encrypted on this Mac with your sync passphrase before it reaches iCloud Drive. Open at login stays on each Mac.")
+                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on, and Activity adds up their captures. Your capture history comes along too unless you turn that off in History. Everything is encrypted on this Mac with your sync passphrase before it reaches iCloud. Open at login stays on each Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            #if !APPSTORE
             Section {
                 Picker("When an update is available", selection: $updater.policy) {
                     ForEach(UpdatePolicy.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -510,6 +511,7 @@ struct GeneralSettings: View {
             } footer: {
                 Text(updateFooter).font(.caption).foregroundStyle(.secondary)
             }
+            #endif
             Section {
                 LabeledContent("All TextLens settings") {
                     Button("Reset to Defaults…") { confirmReset = true }
@@ -599,8 +601,8 @@ struct SyncPassphraseForm: View {
 
     private var prompt: String {
         switch mode {
-        case .create: "Choose a sync passphrase. Your settings are encrypted with it before they go to iCloud Drive, and you'll enter the same passphrase on your other Macs. It never leaves your Macs and can't be recovered, so keep it somewhere safe."
-        case .enter: "Your settings in iCloud Drive are encrypted. Enter the sync passphrase you chose on your other Mac."
+        case .create: "Choose a sync passphrase. Your settings and history are encrypted with it before they go to iCloud, and you'll enter the same passphrase on your other Macs. It never leaves your Macs and can't be recovered, so keep it somewhere safe."
+        case .enter: "Your synced settings are encrypted. Enter the sync passphrase you chose on your other Mac."
         case .change: "Choose a new sync passphrase. Your other Macs keep syncing; you'll only need the new one when you set up another Mac."
         case .startOver: "Choose a new sync passphrase. Enter it on your other Macs when they ask."
         }

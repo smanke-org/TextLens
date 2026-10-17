@@ -6,27 +6,24 @@ import Observation
 import SystemConfiguration
 import TextLensKit
 
-/// Combines the Activity graph's counts from every Mac that shares TextLens settings
-/// through iCloud Drive.
+/// Combines the Activity graph's counts from every Mac that shares TextLens settings.
 ///
-/// Each Mac writes only its own file, `iCloud Drive/TextLens/Activity/<device>.tlsync`
-/// (sealed with the sync key, like the settings), and reads the others'. With one writer per file there are no conflicts to resolve, and the
-/// counts are whole-day totals, so reading a file twice never counts anything twice. Only
-/// numbers are shared, never what was captured. Takes part only while settings sync is on;
-/// turning it off removes this Mac's file, so the other Macs stop counting it.
+/// Each Mac writes only its own CloudKit record, `Device_<device>` (sealed with the sync key,
+/// like the settings), and reads the others'. With one writer per record there are no
+/// conflicts to resolve, and the counts are whole-day totals, so reading a record twice never
+/// counts anything twice. Only numbers are shared, never what was captured. Takes part only
+/// while settings sync is on; turning it off removes this Mac's record, so the other Macs
+/// stop counting it.
 @Observable
 @MainActor
 final class ActivitySync {
     static let shared = ActivitySync()
 
-    /// The other Macs' latest files, by device ID.
+    /// The other Macs' latest records, by device ID.
     private(set) var remotes: [String: DeviceActivity] = [:]
 
     @ObservationIgnored private var started = false
-    @ObservationIgnored private var observingWake = false
-    @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var publishTask: Task<Void, Never>?
-    @ObservationIgnored private let queue = DispatchQueue(label: "com.smanke.TextLens.activitysync", qos: .utility)
 
     private enum Keys {
         static let remoteCache = "activitySync.remotes"
@@ -36,8 +33,8 @@ final class ActivitySync {
 
     private init() {
         // Last-known counts from the other Macs, so the graph is complete at once rather
-        // than showing only this Mac until the first read lands.
-        if let data = UserDefaults.standard.data(forKey: Keys.remoteCache),
+        // than showing only this Mac until the first fetch lands.
+        if let data = AppDefaults.store.data(forKey: Keys.remoteCache),
            let cached = try? DeviceActivity.decoder.decode([String: DeviceActivity].self, from: data) {
             remotes = cached
         }
@@ -45,7 +42,7 @@ final class ActivitySync {
 
     // MARK: - What the graph shows
 
-    /// Whether other Macs' counts are combined: settings sync is on, unlocked, and iCloud Drive is there.
+    /// Whether other Macs' counts are combined: settings sync is on and unlocked.
     var isActive: Bool { SettingsSync.shared.isReady }
 
     /// The other Macs whose counts are combined; none while sync is off.
@@ -60,53 +57,26 @@ final class ActivitySync {
 
     // MARK: - Lifecycle
 
-    /// At launch, and whenever settings sync is turned on or off.
+    /// When the sync engine starts, and whenever settings sync is turned off.
     func start() {
-        guard SettingsSync.shared.isEnabled else {
-            stop()
-            return
-        }
-        // Waits for the passphrase; nothing goes up unencrypted.
-        guard SettingsSync.shared.key != nil, !started else { return }
+        guard SettingsSync.shared.isEnabled else { return stop() }
+        guard CloudSync.shared.isRunning else { return }
         started = true
-        publish()
-        refresh()
-        // Other Macs' captures arrive in the background; look for them now and then.
-        timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
-            MainActor.assumeIsolated { ActivitySync.shared.refresh() }
-        }
-        guard !observingWake else { return }
-        observingWake = true
-        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { ActivitySync.shared.refresh() }
-        }
+        CloudSync.shared.queueSave([CloudSync.Name.device(DeviceIdentity.deviceID)])
     }
 
-    /// Settings sync was turned off: stop sharing, and take this Mac's file away so the
+    /// Settings sync was turned off: stop sharing, and take this Mac's record away so the
     /// other Macs no longer count it.
     private func stop() {
         guard started else { return }
         started = false
-        timer?.invalidate()
-        timer = nil
         publishTask?.cancel()
-        guard let folder = Self.folder else { return }
-        let id = DeviceIdentity.deviceID
-        queue.async {
-            for name in ["\(id).tlsync", "\(id).json"] { SettingsSync.coordinatedDelete(folder.appending(path: name)) }
-        }
+        let name = CloudSync.Name.device(DeviceIdentity.deviceID)
+        Task { await CloudSync.shared.deleteNow(name) }
     }
 
-    /// This Mac got a sync key (set up, joined, or started over): write this Mac's file
-    /// sealed with it, and read the others' again.
-    func keyDidChange() {
-        guard started else { return start() }
-        publish()
-        refresh()
-    }
-
-    /// A capture was counted on this Mac. Written a few seconds later, so a burst of
-    /// captures writes once.
+    /// A capture was counted on this Mac. Sent a few seconds later, so a burst of captures
+    /// sends once.
     func localDidChange() {
         guard started else { return }
         publishTask?.cancel()
@@ -114,130 +84,70 @@ final class ActivitySync {
             try? await Task.sleep(for: .seconds(5))
             guard !Task.isCancelled else { return }
             publishTask = nil
-            publish()
+            CloudSync.shared.queueSave([CloudSync.Name.device(DeviceIdentity.deviceID)])
         }
     }
 
-    /// At quit, writes a capture still waiting for its debounced write.
+    /// At quit, queues a capture still waiting for its debounced send (it goes up next time
+    /// if not now).
     func flush() {
         guard started, publishTask != nil else { return }
         publishTask?.cancel()
         publishTask = nil
-        publish(waiting: true)
+        CloudSync.shared.queueSave([CloudSync.Name.device(DeviceIdentity.deviceID)])
     }
 
-    // MARK: - Files
+    /// Reads other Macs' counts again.
+    func refresh() { CloudSync.shared.fetchNow() }
 
-    /// `iCloud Drive/TextLens/Activity`, or nil while iCloud Drive is off. Follows
-    /// `TEXTLENS_SYNC_FOLDER`, so a test build never overwrites the installed app's file
-    /// (both share this Mac's device ID).
-    nonisolated static var folder: URL? {
-        let drive = SettingsSync.iCloudDrive
-        guard FileManager.default.fileExists(atPath: drive.path) else { return nil }
-        return drive.appending(path: "TextLens").appending(path: "Activity")
-    }
+    // MARK: - From CloudSync
 
-    /// `waiting` blocks briefly for the write, for quit, where there's no later chance.
-    private func publish(waiting: Bool = false) {
-        guard started, let folder = Self.folder, let key = SettingsSync.shared.key else { return }
-        let done = DispatchSemaphore(value: 0)
+    /// This Mac's record, sealed.
+    func sealedOwnRecord(using key: SymmetricKey) -> Data? {
         let record = DeviceActivity(deviceID: DeviceIdentity.deviceID, deviceName: DeviceIdentity.deviceName,
                                     updatedAt: Date(), appVersion: AppInfo.version, log: ActivityStore.shared.log)
-        queue.async {
-            defer { done.signal() }
-            do {
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let data = try SyncCrypto.seal(DeviceActivity.encoder.encode(record), using: key)
-                let url = folder.appending(path: "\(record.deviceID).tlsync")
-                var coordinationError: NSError?
-                var writeError: Error?
-                NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing, error: &coordinationError) { target in
-                    do { try data.write(to: target, options: .atomic) } catch { writeError = error }
-                }
-                if let error = coordinationError ?? writeError { throw error }
-                // The unencrypted file from 1.0.7 and earlier goes once the sealed one is there.
-                let legacy = folder.appending(path: "\(record.deviceID).json")
-                if FileManager.default.fileExists(atPath: legacy.path) { SettingsSync.coordinatedDelete(legacy) }
-            } catch {
-                NSLog("TextLens: couldn't share activity through iCloud Drive: \(error.localizedDescription)")
-            }
-        }
-        // Bounded, so a busy iCloud daemon can't hold up quitting.
-        if waiting { _ = done.wait(timeout: .now() + 2) }
+        return try? SyncCrypto.seal(DeviceActivity.encoder.encode(record), using: key)
     }
 
-    /// Reads the other Macs' files. Off the main thread, since a coordinated read can wait
-    /// on iCloud.
-    func refresh() {
-        guard started, let folder = Self.folder, let key = SettingsSync.shared.key else { return }
-        let ownID = DeviceIdentity.deviceID
-        queue.async {
-            let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
-            var fresh: [String: DeviceActivity] = [:]
-            var legacy: [String: DeviceActivity] = [:]
-            var downloading = Set<String>()
-            for name in names {
-                // iCloud Drive can evict a file to save space, leaving ".<name>.icloud".
-                // Ask for it back and keep the last-known counts meanwhile.
-                if name.hasPrefix("."), name.hasSuffix(".icloud") {
-                    let real = String(name.dropFirst().dropLast(".icloud".count))
-                    guard let id = Self.deviceID(fromFileName: real), id != ownID else { continue }
-                    try? FileManager.default.startDownloadingUbiquitousItem(at: folder.appending(path: real))
-                    downloading.insert(id)
-                    continue
-                }
-                guard let id = Self.deviceID(fromFileName: name), id != ownID else { continue }
-                var data: Data?
-                var coordinationError: NSError?
-                NSFileCoordinator().coordinate(readingItemAt: folder.appending(path: name), options: [], error: &coordinationError) { target in
-                    data = try? Data(contentsOf: target)
-                }
-                guard let data else { continue }
-                if name.hasSuffix(".tlsync") {
-                    // A file sealed with another key (from before someone started over) is skipped.
-                    guard let plain = try? SyncCrypto.open(data, using: key),
-                          let record = try? DeviceActivity.decoder.decode(DeviceActivity.self, from: plain) else { continue }
-                    fresh[record.deviceID] = record
-                } else if let record = try? DeviceActivity.decoder.decode(DeviceActivity.self, from: data) {
-                    // A Mac still on 1.0.7 or earlier: its counts stay in the graph until it updates.
-                    legacy[record.deviceID] = record
-                }
-            }
-            for (id, record) in legacy where fresh[id] == nil { fresh[id] = record }
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { ActivitySync.shared.apply(fresh, downloading: downloading) }
-            }
-        }
+    /// Another Mac's record arrived.
+    func received(_ sealed: Data) {
+        guard let key = SettingsSync.shared.key, let plain = try? SyncCrypto.open(sealed, using: key),
+              let record = try? DeviceActivity.decoder.decode(DeviceActivity.self, from: plain),
+              record.deviceID != DeviceIdentity.deviceID else { return }
+        var merged = remotes
+        merged[record.deviceID] = record
+        apply(merged)
     }
 
-    /// `<device>.tlsync`, or `<device>.json` from 1.0.7 and earlier.
-    nonisolated private static func deviceID(fromFileName name: String) -> String? {
-        for suffix in [".tlsync", ".json"] where name.hasSuffix(suffix) && !name.hasPrefix(".") {
-            return String(name.dropLast(suffix.count))
-        }
-        return nil
+    /// A Mac turned sync off (or its record was deleted): it drops out.
+    func removed(deviceID: String) {
+        guard remotes[deviceID] != nil else { return }
+        var merged = remotes
+        merged[deviceID] = nil
+        apply(merged)
     }
 
-    private func apply(_ fresh: [String: DeviceActivity], downloading: Set<String>) {
-        var merged = fresh
-        for id in downloading where merged[id] == nil { merged[id] = remotes[id] }
-        // A Mac whose file is gone (sync turned off there, or the file deleted) drops out.
+    private func apply(_ merged: [String: DeviceActivity]) {
         if merged != remotes { remotes = merged }
         if let data = try? DeviceActivity.encoder.encode(remotes) {
-            UserDefaults.standard.set(data, forKey: Keys.remoteCache)
+            AppDefaults.store.set(data, forKey: Keys.remoteCache)
         }
         // So the combined numbers can be checked with `defaults read com.smanke.TextLens`.
-        UserDefaults.standard.set(activeRemotes.count + 1, forKey: Keys.macCount)
-        UserDefaults.standard.set(combinedLog.days.values.reduce(0) { $0 + $1.values.reduce(0, +) }, forKey: Keys.allMacsCaptures)
+        AppDefaults.store.set(activeRemotes.count + 1, forKey: Keys.macCount)
+        AppDefaults.store.set(combinedLog.days.values.reduce(0) { $0 + $1.values.reduce(0, +) }, forKey: Keys.allMacsCaptures)
     }
 }
 
-/// A stable identity for this Mac that is safe to write into iCloud Drive.
+/// A stable identity for this Mac that is safe to put in iCloud.
 enum DeviceIdentity {
     /// From the hardware UUID, so it survives reinstalls and is not carried to a new Mac
     /// by Migration Assistant (an ID kept in UserDefaults would be, and two Macs would then
     /// share one file). Hashed, so the hardware identifier never leaves the Mac.
     static let deviceID: String = {
+        #if DEBUG
+        // Test copies on one Mac pretend to be different Macs.
+        if let override = ProcessInfo.processInfo.environment["TEXTLENS_DEVICE_ID"] { return override }
+        #endif
         let source = hardwareUUID() ?? fallbackUUID()
         let digest = SHA256.hash(data: Data("\(source):com.smanke.TextLens".utf8))
         return digest.map { String(format: "%02x", $0) }.joined().prefix(16).description
@@ -260,9 +170,9 @@ enum DeviceIdentity {
     /// Only reached if IOKit won't give up the hardware UUID.
     private static func fallbackUUID() -> String {
         let key = "activitySync.fallbackDeviceUUID"
-        if let existing = UserDefaults.standard.string(forKey: key) { return existing }
+        if let existing = AppDefaults.store.string(forKey: key) { return existing }
         let created = UUID().uuidString
-        UserDefaults.standard.set(created, forKey: key)
+        AppDefaults.store.set(created, forKey: key)
         return created
     }
 }

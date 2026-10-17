@@ -9,11 +9,11 @@ final class Capture {
 
     /// The area last captured, for "Capture Again".
     private(set) var lastRegion: ScreenRegion? {
-        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(lastRegion), forKey: "lastRegion") }
+        didSet { AppDefaults.store.set(try? JSONEncoder().encode(lastRegion), forKey: "lastRegion") }
     }
 
     private init() {
-        if let data = UserDefaults.standard.data(forKey: "lastRegion") {
+        if let data = AppDefaults.store.data(forKey: "lastRegion") {
             lastRegion = try? JSONDecoder().decode(ScreenRegion.self, from: data)
         }
     }

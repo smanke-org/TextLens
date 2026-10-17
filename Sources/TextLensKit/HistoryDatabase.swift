@@ -192,6 +192,10 @@ public final class HistoryDatabase: @unchecked Sendable {
         }
     }
 
+    public func removeValues(withPrefix prefix: String) throws {
+        try run("DELETE FROM kv WHERE substr(key, 1, ?) = ?", [prefix.count, prefix])
+    }
+
     public func string(forKey key: String) -> String? { data(forKey: key).flatMap { String(data: $0, encoding: .utf8) } }
     public func set(_ string: String?, forKey key: String) throws { try set(string.map { Data($0.utf8) }, forKey: key) }
 
