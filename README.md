@@ -56,7 +56,7 @@ Settings › Privacy explains all of this in the app.
 
 ## Updates
 
-TextLens checks for new versions every 30 minutes. In Settings › General you choose whether it installs them
+TextLens checks for new versions once a day, or as often as you choose in Settings (a number of hours, days, weeks or months). In Settings › General you choose whether it installs them
 automatically when you're not using it, asks first, or doesn't check.
 
 ## Build from source

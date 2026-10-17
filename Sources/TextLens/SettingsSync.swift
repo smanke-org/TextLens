@@ -82,7 +82,8 @@ final class SettingsSync {
 
     /// Settings that follow the user between Macs.
     static var syncedKeys: [String] {
-        Preferences.keys + ["showInDock", "showInMenuBar", UpdatePolicy.key]
+        Preferences.keys + ["showInDock", "showInMenuBar", UpdatePolicy.key,
+         UpdateInterval.valueKey, UpdateInterval.unitKey]
     }
 
     var isReady: Bool { isEnabled && keyState == .ready && key != nil }
@@ -351,6 +352,8 @@ final class SettingsSync {
         settings["showInDock"] = AppPresence.showInDock
         settings["showInMenuBar"] = AppPresence.showInMenuBar
         settings[UpdatePolicy.key] = UpdatePolicy.current.rawValue
+        settings[UpdateInterval.valueKey] = UpdateInterval.current.value
+        settings[UpdateInterval.unitKey] = UpdateInterval.current.unit.rawValue
         let plist: [String: Any] = ["version": 3, "updatedAt": updatedAt, "updatedBy": Self.deviceName, "settings": settings]
         guard let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0),
               let sealed = try? SyncCrypto.seal(data, using: key) else { return nil }
@@ -384,6 +387,7 @@ final class SettingsSync {
         }
         Preferences.shared.reload()
         AutoUpdater.shared.policy = UpdatePolicy.current
+        AutoUpdater.shared.interval = UpdateInterval.current
         HotKeyCenter.shared.apply()
         PresenceSettings.shared.reload()
         localModified = remote.updatedAt
