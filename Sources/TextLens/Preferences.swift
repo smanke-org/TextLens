@@ -57,7 +57,9 @@ final class Preferences {
     var watchShowOutline = true { didSet { save(watchShowOutline, "watchShowOutline") } }
 
     // MARK: History
-    var historyEnabled = true { didSet { save(historyEnabled, "historyEnabled") } }
+    var historyEnabled = true { didSet { save(historyEnabled, "historyEnabled"); historySyncChanged() } }
+    /// History travels between Macs too, while settings sync is on.
+    var historySync = true { didSet { save(historySync, "historySync"); historySyncChanged() } }
     var historyMaxCount = Defaults.historyMaxCount { didSet { save(historyMaxCount, "historyMaxCount") } }
     /// 0 keeps entries until the count limit pushes them out.
     var historyMaxDays = 0 { didSet { save(historyMaxDays, "historyMaxDays") } }
@@ -93,7 +95,7 @@ final class Preferences {
         "customWords", "openLinks", "playSound", "showNotice", "additiveClipboard", "speakAfterCapture", "speechRate",
         "targetLanguage", "translationCopy", "liveInterval", "liveCoversOriginal",
         "watchInterval", "watchTrigger", "watchSound", "watchSaveToHistory", "watchShowOutline",
-        "historyEnabled", "historyMaxCount", "historyMaxDays", "historySaveImages",
+        "historyEnabled", "historySync", "historyMaxCount", "historyMaxDays", "historySaveImages",
         "captureTextHotKey", "captureCodeHotKey", "captureAgainHotKey", "translateHotKey", "liveTranslateHotKey",
         "watchHotKey", "historyHotKey",
     ]
@@ -125,7 +127,7 @@ final class Preferences {
             "liveInterval": liveInterval, "liveCoversOriginal": liveCoversOriginal,
             "watchInterval": watchInterval, "watchTrigger": watchTrigger.rawValue, "watchSound": watchSound,
             "watchSaveToHistory": watchSaveToHistory, "watchShowOutline": watchShowOutline,
-            "historyEnabled": historyEnabled, "historyMaxCount": historyMaxCount, "historyMaxDays": historyMaxDays,
+            "historyEnabled": historyEnabled, "historySync": historySync, "historyMaxCount": historyMaxCount, "historyMaxDays": historyMaxDays,
             "historySaveImages": historySaveImages,
             "captureTextHotKey": data(captureTextHotKey), "captureCodeHotKey": data(captureCodeHotKey),
             "captureAgainHotKey": data(captureAgainHotKey), "translateHotKey": data(translateHotKey),
@@ -135,7 +137,16 @@ final class Preferences {
     }
 
     /// Re-reads every setting after another Mac's settings were written into UserDefaults.
-    func reload() { load() }
+    func reload() {
+        load()
+        historySyncChanged(force: true)
+    }
+
+    /// History sync follows History and its own switch. Deferred, since it reads Preferences.
+    private func historySyncChanged(force: Bool = false) {
+        guard !loading || force else { return }
+        DispatchQueue.main.async { MainActor.assumeIsolated { HistorySync.shared.start() } }
+    }
 
     private func load() {
         loading = true
@@ -175,6 +186,7 @@ final class Preferences {
         watchShowOutline = bool("watchShowOutline", true)
 
         historyEnabled = bool("historyEnabled", true)
+        historySync = bool("historySync", true)
         historyMaxCount = int("historyMaxCount", Defaults.historyMaxCount)
         historyMaxDays = int("historyMaxDays", 0)
         historySaveImages = bool("historySaveImages", true)

@@ -27,6 +27,7 @@ final class HistoryWindow: NSObject, NSWindowDelegate {
         else if model.selection == nil { model.selection = HistoryStore.shared.entries.first?.id }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        HistorySync.shared.scan()
     }
 }
 
@@ -45,7 +46,7 @@ struct HistoryView: View {
     @State private var confirmClear = false
 
     private var results: [HistoryEntry] {
-        HistoryQuery.search(store.entries, query: model.query, kind: model.kind)
+        store.search(model.query, kind: model.kind)
     }
 
     private var selected: HistoryEntry? {
@@ -111,7 +112,9 @@ struct HistoryView: View {
             Button("Clear All but Pinned", role: .destructive) { store.clear(keepPinned: true) }
             Button("Clear Everything", role: .destructive) { store.clear(keepPinned: false) }
         } message: {
-            Text("Captured text and pictures are deleted from this Mac. This can't be undone.")
+            Text(HistorySync.shared.isActive
+                 ? "Captured text and pictures are deleted from this Mac and your other Macs. This can't be undone."
+                 : "Captured text and pictures are deleted from this Mac. This can't be undone.")
         }
     }
 

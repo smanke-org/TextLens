@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if newInstall { SettingsSync.shared.adoptOnNewInstall() }
         SettingsSync.shared.start()
         ActivitySync.shared.start()
+        HistorySync.shared.start()
         #if DEBUG
         SyncDebugHook.run()
         #endif

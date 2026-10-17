@@ -6,7 +6,7 @@ Apple's own text recognition and translation, and nothing is uploaded.
 
 TextLens also:
 - **Translates** what you capture, or keeps translating an area live (subtitles, chats, slides).
-- **Remembers** every capture in a searchable history, and graphs how much you capture over time.
+- **Remembers** every capture in a searchable history that can follow you to your other Macs, and graphs how much you capture over time.
 - **Watches** an area of the screen and tells you when its text changes, or when a word shows up or goes away.
 - **Reads and makes QR codes**: open links, join Wi-Fi, add contacts, or make a code for a link or your Wi-Fi.
 
@@ -41,14 +41,15 @@ Drive, never what you captured.
 
 ## Privacy
 
-Text recognition, translation and QR codes run entirely on your Mac, and your capture history never leaves
-it. TextLens has no account, analytics or tracking, and nothing is ever sent to the developer. The only
-connection it makes on its own is to GitHub, to check for updates.
+Text recognition, translation and QR codes run entirely on your Mac. TextLens has no account, analytics or
+tracking, and nothing is ever sent to the developer. The only connection it makes on its own is to GitHub, to
+check for updates.
 
-Settings sync is end-to-end encrypted. Your settings and capture counts are sealed with AES-256-GCM on your
-Mac before they reach iCloud Drive, using a key that only your sync passphrase unlocks. The passphrase never
-leaves your Macs, so neither Apple nor the developer can read what's synced. Settings › Privacy explains all
-of this in the app.
+Sync is end-to-end encrypted. With "Sync settings with your other Macs" on, your settings, capture history
+(with its pictures) and capture counts are sealed with AES-256-GCM on your Mac before they reach iCloud Drive,
+using a key that only your sync passphrase unlocks. The passphrase never leaves your Macs, so neither Apple nor
+the developer can read what's synced. History sync can be turned off on its own in Settings › History, and
+Settings › Privacy explains all of this in the app.
 
 ## Updates
 

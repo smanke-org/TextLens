@@ -302,4 +302,75 @@ private func line(_ text: String, row: Double, x: Double = 0.05, width: Double =
         #expect(throws: SyncCrypto.CryptoError.self) { try SyncCrypto.open(sealed, using: SymmetricKey(size: .bits256)) }
         #expect(throws: SyncCrypto.CryptoError.self) { try SyncCrypto.open(plain, using: key) }
     }
+
+    @Test func historyDatabaseStoresSearchesAndDeletes() throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "tl-db-\(UUID().uuidString)/History.sqlite")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let db = try HistoryDatabase(url: url)
+        let old = HistoryEntry(date: Date(timeIntervalSinceNow: -100), kind: .text, text: "Le café est ouvert", appName: "Viewer")
+        let new = HistoryEntry(kind: .translation, text: "Hola mundo", translation: "Hello world", appName: "Browser")
+        try db.upsert([(old, png: Data([1, 2, 3])), (new, png: nil)])
+        #expect(db.count == 2)
+        #expect(db.allEntries().map(\.id) == [new.id, old.id])
+        #expect(db.image(old.id) == Data([1, 2, 3]))
+        #expect(db.search("CAFE") == [old.id])          // case and accents ignored
+        #expect(db.search("hello wor") == [new.id])     // every word, translation included
+        #expect(db.search("est ouv") == [old.id])       // a short word checked after the index
+        #expect(db.search("browser") == [new.id])       // app name
+        #expect(db.search("nothing here").isEmpty)
+        #expect(db.search("").count == 2)
+
+        var edited = old
+        edited.text = "Shop is closed"
+        edited.modified = Date()
+        try db.upsert(edited)
+        #expect(db.search("cafe").isEmpty)
+        #expect(db.search("closed") == [old.id])
+
+        let when = Date()
+        try db.delete([old.id], tombstone: when)
+        #expect(db.entry(old.id) == nil && db.image(old.id) == nil)
+        #expect(db.tombstone(old.id).map { abs($0.timeIntervalSince(when)) < 0.001 } == true)
+        #expect(db.search("closed").isEmpty)
+        // Re-adding (a newer copy from another Mac) clears the tombstone.
+        try db.upsert(edited)
+        #expect(db.tombstone(old.id) == nil)
+    }
+
+    @Test func syncedCaptureRoundTripsAndResolves() throws {
+        let entry = HistoryEntry(kind: .code, text: "WIFI:S:Test;;", thumbnail: "x.png", modified: Date(timeIntervalSince1970: 1_800_000_000), origin: "abc")
+        let copy = SyncedCapture(entry: entry, png: Data([9, 9]))
+        #expect(try SyncedCapture.decode(copy.encoded()) == copy)
+        let gone = SyncedCapture(deleted: entry.id, at: Date(timeIntervalSince1970: 1_800_000_000))
+        #expect(try SyncedCapture.decode(gone.encoded()).isDeletion)
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(SyncedCapture.wins(t, incomingIsDeletion: false, over: nil, localIsDeletion: false))
+        #expect(!SyncedCapture.wins(t, incomingIsDeletion: false, over: t, localIsDeletion: false))
+        #expect(SyncedCapture.wins(t, incomingIsDeletion: true, over: t, localIsDeletion: false))
+        #expect(!SyncedCapture.wins(t, incomingIsDeletion: false, over: t.addingTimeInterval(1), localIsDeletion: true))
+    }
+
+    @Test func historyDatabaseStaysFastWhenLarge() throws {
+        let url = FileManager.default.temporaryDirectory.appending(path: "tl-db-\(UUID().uuidString)/History.sqlite")
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let db = try HistoryDatabase(url: url)
+        let words = ["invoice", "meeting", "receipt", "boarding", "password", "recipe", "chapter", "schedule"]
+        let rows = (0..<20_000).map { i in
+            (HistoryEntry(date: Date(timeIntervalSinceNow: -Double(i)), kind: .text,
+                          text: "\(words[i % words.count]) number \(i) lorem ipsum dolor sit amet"), png: Data?.none)
+        }
+        let insertStart = Date()
+        try db.upsert(rows)
+        let insert = Date().timeIntervalSince(insertStart)
+        let one = Date()
+        try db.upsert(HistoryEntry(kind: .text, text: "one more capture"))
+        let single = Date().timeIntervalSince(one)
+        let searchStart = Date()
+        let found = db.search("receipt 1999")
+        let search = Date().timeIntervalSince(searchStart)
+        print("history db: 20k insert \(insert)s, one save \(single)s, search \(search)s")
+        #expect(found.count == 1)
+        #expect(single < 0.05)
+        #expect(search < 0.5)
+    }
 }

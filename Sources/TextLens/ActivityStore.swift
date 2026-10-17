@@ -35,7 +35,10 @@ final class ActivityStore {
 
     /// The first time the graph exists, start it from whatever History already holds.
     private func seedFromHistory() {
-        for entry in HistoryStore.shared.entries { log.record(entry.kind.rawValue, at: entry.date) }
+        // Only this Mac's captures: synced ones are counted by the Mac that took them.
+        for entry in HistoryStore.shared.entries where entry.origin == nil || entry.origin == DeviceIdentity.deviceID {
+            log.record(entry.kind.rawValue, at: entry.date)
+        }
         if !log.days.isEmpty { save() }
     }
 

@@ -315,6 +315,8 @@ struct HistorySettings: View {
     @State private var prefs = Preferences.shared
     @State private var store = HistoryStore.shared
     @State private var confirmClear = false
+    @State private var settingsSync = SettingsSync.shared
+    @State private var historySync = HistorySync.shared
 
     var body: some View {
         Form {
@@ -332,7 +334,36 @@ struct HistorySettings: View {
                 }
                 .onChange(of: prefs.historyMaxDays) { store.prune() }
             } footer: {
-                Text("History stays on this Mac and is never synced. Pinned captures are kept no matter what.")
+                Text("Pinned captures are kept no matter what.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Sync history with your other Macs", isOn: $prefs.historySync)
+                    .disabled(!prefs.historyEnabled)
+                if prefs.historySync && prefs.historyEnabled {
+                    if !settingsSync.isEnabled {
+                        Text("Turn on “Sync settings with your other Macs” in General to start.")
+                            .foregroundStyle(.secondary)
+                    } else if !settingsSync.isReady {
+                        Text("Waiting for your sync passphrase in General.").foregroundStyle(.secondary)
+                    } else if let error = historySync.lastError {
+                        Text(error).foregroundStyle(.red)
+                    } else {
+                        LabeledContent {
+                            Button("Sync Now") { historySync.syncNow() }
+                        } label: {
+                            if historySync.pendingUploads > 0 {
+                                Text("Uploading \(historySync.pendingUploads) capture\(historySync.pendingUploads == 1 ? "" : "s")…")
+                            } else if let date = historySync.lastSynced {
+                                Text("Synced \(date.formatted(date: .omitted, time: .shortened))")
+                            } else {
+                                Text("Waiting for iCloud Drive…")
+                            }
+                        }
+                    }
+                }
+            } footer: {
+                Text("Captures, translations and their pictures go to every Mac where you use TextLens with sync on, end-to-end encrypted with your sync passphrase. Deleting or clearing a capture removes it everywhere.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -349,7 +380,9 @@ struct HistorySettings: View {
             Button("Clear All but Pinned", role: .destructive) { store.clear(keepPinned: true) }
             Button("Clear Everything", role: .destructive) { store.clear(keepPinned: false) }
         } message: {
-            Text("Captured text and pictures are deleted from this Mac. This can't be undone.")
+            Text(historySync.isActive
+                 ? "Captured text and pictures are deleted from this Mac and your other Macs. This can't be undone."
+                 : "Captured text and pictures are deleted from this Mac. This can't be undone.")
         }
     }
 }
@@ -446,7 +479,7 @@ struct GeneralSettings: View {
             } header: {
                 Text("iCloud")
             } footer: {
-                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on, and Activity adds up their captures. They're encrypted on this Mac with your sync passphrase before they reach iCloud Drive. Your capture history and open at login stay on each Mac.")
+                Text("Shortcuts, recognition, translation and other settings follow you to every Mac signed in to the same iCloud account with sync turned on, and Activity adds up their captures. Your capture history comes along too unless you turn that off in History. Everything is encrypted on this Mac with your sync passphrase before it reaches iCloud Drive. Open at login stays on each Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

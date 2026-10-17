@@ -6,20 +6,31 @@ import SwiftUI
 /// What TextLens keeps, what leaves the Mac and what the developer sees (nothing).
 struct PrivacySettings: View {
     @State private var sync = SettingsSync.shared
+    @State private var prefs = Preferences.shared
     @State private var updater = AutoUpdater.shared
     @State private var screenAccess = ScreenAccess.granted
+
+    private var whatSyncs: String {
+        prefs.historyEnabled && prefs.historySync
+            ? "your settings, capture history (with pictures) and daily capture counts"
+            : "your settings and daily capture counts"
+    }
+
+    private var syncSummary: String {
+        sync.isEnabled
+            ? "Sync is on, so \(whatSyncs) are kept in your own iCloud Drive."
+            : "Sync is off, so nothing goes to iCloud. If you turn it on in General, \(whatSyncs) go to your own iCloud Drive."
+    }
 
     var body: some View {
         Form {
             Section("On this Mac") {
-                PrivacyPoint("text.viewfinder", "Text recognition, translation and QR codes are handled entirely on your Mac by macOS's built-in frameworks. Nothing you capture is uploaded.")
-                PrivacyPoint("clock.arrow.circlepath", "Your capture history, including any pictures, is stored only on this Mac and is never synced.")
-                PrivacyPoint("rectangle.dashed", "TextLens only looks at the screen when you capture, watch an area or translate live. The screen picture is read on your Mac and thrown away.")
+                PrivacyPoint("text.viewfinder", "Text recognition, translation and QR codes are handled entirely on your Mac by macOS's built-in frameworks. Nothing is sent to an online service.")
+                PrivacyPoint("clock.arrow.circlepath", "Your capture history, including any pictures, is kept in a database on this Mac.")
+                PrivacyPoint("rectangle.dashed", "TextLens only looks at the screen when you capture, watch an area or translate live. It reads the picture on your Mac and keeps a small copy in your history only if saving pictures is on.")
             }
             Section {
-                PrivacyPoint("icloud", sync.isEnabled
-                    ? "Sync is on. Your settings and daily capture counts are kept in your own iCloud Drive. Captured text and pictures never sync."
-                    : "Sync is off, so nothing goes to iCloud. If you turn it on in General, only your settings and daily capture counts go to your own iCloud Drive. Captured text and pictures never sync.")
+                PrivacyPoint("icloud", syncSummary)
                 PrivacyPoint("lock", "They're encrypted on this Mac with AES-256-GCM before they're uploaded, using a key only your sync passphrase unlocks. The passphrase never leaves your Macs, so neither Apple nor the developer can read them.")
             } header: {
                 Text("iCloud")

@@ -34,13 +34,21 @@ public struct HistoryEntry: Codable, Identifiable, Equatable, Sendable {
     /// The app that was in front when the capture was taken.
     public var appName: String?
     public var appBundleID: String?
-    /// File name of the thumbnail inside the history folder.
+    /// Set when a picture of the capture is saved (in the history database; before 1.0.9,
+    /// the file name of the thumbnail inside the history folder).
     public var thumbnail: String?
     public var pinned: Bool
+    /// When the entry last changed on any Mac, for syncing (nil before 1.0.9: `date`).
+    public var modified: Date?
+    /// The hashed device ID of the Mac that captured it (nil before 1.0.9: this Mac).
+    public var origin: String?
+
+    public var lastModified: Date { modified ?? date }
 
     public init(id: UUID = UUID(), date: Date = Date(), kind: Kind, text: String, translation: String? = nil,
                 sourceLanguage: String? = nil, targetLanguage: String? = nil, appName: String? = nil,
-                appBundleID: String? = nil, thumbnail: String? = nil, pinned: Bool = false) {
+                appBundleID: String? = nil, thumbnail: String? = nil, pinned: Bool = false,
+                modified: Date? = nil, origin: String? = nil) {
         self.id = id
         self.date = date
         self.kind = kind
@@ -52,6 +60,8 @@ public struct HistoryEntry: Codable, Identifiable, Equatable, Sendable {
         self.appBundleID = appBundleID
         self.thumbnail = thumbnail
         self.pinned = pinned
+        self.modified = modified
+        self.origin = origin
     }
 
     public init(from decoder: Decoder) throws {
@@ -67,6 +77,8 @@ public struct HistoryEntry: Codable, Identifiable, Equatable, Sendable {
         appBundleID = try c.decodeIfPresent(String.self, forKey: .appBundleID)
         thumbnail = try c.decodeIfPresent(String.self, forKey: .thumbnail)
         pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        modified = try c.decodeIfPresent(Date.self, forKey: .modified)
+        origin = try c.decodeIfPresent(String.self, forKey: .origin)
     }
 }
 
@@ -108,7 +120,18 @@ public enum HistoryQuery {
         return line.count > limit ? String(line.prefix(limit - 1)) + "…" : line
     }
 
-    static func fold(_ text: String) -> String {
+    /// Whether an entry contains every term (already folded), for terms too short for the index.
+    public static func matches(_ entry: HistoryEntry, terms: [String]) -> Bool {
+        let haystack = fold(searchBody(entry))
+        return terms.allSatisfy { haystack.contains($0) }
+    }
+
+    /// What an entry is found by.
+    public static func searchBody(_ entry: HistoryEntry) -> String {
+        [entry.text, entry.translation ?? "", entry.appName ?? ""].joined(separator: " ")
+    }
+
+    public static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
     }
 }

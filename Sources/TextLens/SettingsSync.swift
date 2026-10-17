@@ -35,6 +35,7 @@ final class SettingsSync {
                 stop()
             }
             ActivitySync.shared.start()
+            HistorySync.shared.start()
         }
     }
     private(set) var lastSynced: Date?
@@ -249,6 +250,7 @@ final class SettingsSync {
         timer?.invalidate()
         start()
         ActivitySync.shared.keyDidChange()
+        HistorySync.shared.start()
     }
 
     private func forgetKey() {
@@ -281,11 +283,15 @@ final class SettingsSync {
         try coordinatedWrite(data, to: Self.keyringFile)
     }
 
-    /// Settings and every Mac's activity file, after starting over with a new key.
+    /// Settings, every Mac's activity file and the synced history, after starting over
+    /// with a new key.
     private func removeSealedFiles() {
         var targets = [Self.file]
-        if let names = try? FileManager.default.contentsOfDirectory(atPath: Self.folder.appending(path: "Activity").path) {
-            targets += names.filter { $0.contains(".tlsync") }.map { Self.folder.appending(path: "Activity").appending(path: $0) }
+        for sub in ["Activity", "History"] {
+            let folder = Self.folder.appending(path: sub)
+            if let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) {
+                targets += names.filter { $0.contains(".tlsync") }.map { folder.appending(path: $0) }
+            }
         }
         targets.forEach(Self.coordinatedDelete)
     }
@@ -317,6 +323,7 @@ final class SettingsSync {
         guard keyState == .ready else {
             stop()
             start()
+            HistorySync.shared.start()
             return
         }
         let date = (try? Self.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -514,9 +521,36 @@ enum SyncDebugHook {
                 }
             }
         }
+        // `TEXTLENS_DEBUG_HISTORY=add:<text>|pin-first|delete-first`, a few seconds after launch.
+        if let command = ProcessInfo.processInfo.environment["TEXTLENS_DEBUG_HISTORY"], !command.isEmpty {
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                let store = HistoryStore.shared
+                if command.hasPrefix("add:") {
+                    let image = CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)?.makeImage()
+                    store.add(kind: .text, text: String(command.dropFirst(4)), app: SourceApp(name: "DebugHook", bundleID: nil), image: image)
+                } else if command == "pin-first", let first = store.entries.first {
+                    store.togglePin(first.id)
+                } else if command == "delete-first", let first = store.entries.first {
+                    store.delete([first.id])
+                }
+            }
+        }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             MainActor.assumeIsolated {
                 let d = UserDefaults.standard
+                let store = HistoryStore.shared
+                d.set(store.entries.count, forKey: "debug.historyCount")
+                d.set(store.entries.filter(\.pinned).count, forKey: "debug.historyPinned")
+                d.set(store.entries.filter { store.image(for: $0) != nil }.count, forKey: "debug.historyImages")
+                d.set(store.entries.first.map { HistoryQuery.snippet($0.text, limit: 40) } ?? "", forKey: "debug.historyFirst")
+                d.set(HistorySync.shared.pendingUploads, forKey: "debug.historyPending")
+                d.set(HistorySync.shared.lastError ?? "", forKey: "debug.historyError")
+                if let q = ProcessInfo.processInfo.environment["TEXTLENS_DEBUG_SEARCH"] {
+                    d.set(store.search(q, kind: nil).count, forKey: "debug.historySearchCount")
+                }
                 d.set("\(sync.keyState)", forKey: "debug.syncKeyState")
                 d.set(sync.lastError ?? "", forKey: "debug.syncError")
                 d.set(sync.lastSource ?? "", forKey: "debug.syncSource")
