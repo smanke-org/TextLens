@@ -16,6 +16,17 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.10</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>TextLens</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>textlens</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>1.0.10</string>
 	<key>LSApplicationCategoryType</key>
@@ -26,5 +37,92 @@
 	<true/>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Steve Manke</string>
+	<key>ToolHUDActions</key>
+	<array>
+		<dict>
+			<key>activates</key>
+			<false/>
+			<key>id</key>
+			<string>capture</string>
+			<key>shortTitle</key>
+			<string>Capture text</string>
+			<key>symbol</key>
+			<string>text.viewfinder</string>
+			<key>title</key>
+			<string>Capture text</string>
+		</dict>
+		<dict>
+			<key>activates</key>
+			<false/>
+			<key>id</key>
+			<string>recapture</string>
+			<key>shortTitle</key>
+			<string>Capture again</string>
+			<key>symbol</key>
+			<string>arrow.clockwise</string>
+			<key>title</key>
+			<string>Capture the same area again</string>
+		</dict>
+		<dict>
+			<key>activates</key>
+			<false/>
+			<key>id</key>
+			<string>qr</string>
+			<key>shortTitle</key>
+			<string>Read QR</string>
+			<key>symbol</key>
+			<string>qrcode.viewfinder</string>
+			<key>title</key>
+			<string>Read a QR or bar code</string>
+		</dict>
+		<dict>
+			<key>activates</key>
+			<false/>
+			<key>id</key>
+			<string>translate</string>
+			<key>shortTitle</key>
+			<string>Translate</string>
+			<key>symbol</key>
+			<string>translate</string>
+			<key>title</key>
+			<string>Capture and translate</string>
+		</dict>
+		<dict>
+			<key>activates</key>
+			<false/>
+			<key>id</key>
+			<string>live-translate</string>
+			<key>shortTitle</key>
+			<string>Live translate</string>
+			<key>symbol</key>
+			<string>captions.bubble</string>
+			<key>title</key>
+			<string>Live translate an area</string>
+		</dict>
+		<dict>
+			<key>activates</key>
+			<false/>
+			<key>id</key>
+			<string>watch</string>
+			<key>shortTitle</key>
+			<string>Watch area</string>
+			<key>symbol</key>
+			<string>eye</string>
+			<key>title</key>
+			<string>Watch an area for changes</string>
+		</dict>
+		<dict>
+			<key>activates</key>
+			<true/>
+			<key>id</key>
+			<string>history</string>
+			<key>shortTitle</key>
+			<string>History</string>
+			<key>symbol</key>
+			<string>clock.arrow.circlepath</string>
+			<key>title</key>
+			<string>Show history</string>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -88,10 +88,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    /// Pictures and PDFs dropped on the Dock icon or opened with TextLens get read.
+    /// Pictures and PDFs dropped on the Dock icon or opened with TextLens get read, and
+    /// `textlens://` URLs (from ToolHUD, Shortcuts or a script) run the action they name.
     func application(_ application: NSApplication, open urls: [URL]) {
-        capture.recognize(files: urls)
+        for url in urls where url.scheme == "textlens" {
+            if let action = Self.urlActions[url.host ?? ""] { perform(action) }
+        }
+        let files = urls.filter(\.isFileURL)
+        if !files.isEmpty { capture.recognize(files: files) }
     }
+
+    /// The `textlens://<host>` actions. Their names and titles are also listed under
+    /// ToolHUDActions in Info.plist, which is how ToolHUD finds them.
+    private static let urlActions: [String: HotKeyCenter.Action] = [
+        "capture": .captureText, "recapture": .captureAgain, "qr": .captureCode, "translate": .translate,
+        "live-translate": .liveTranslate, "watch": .watch, "history": .history,
+    ]
 
     private func perform(_ action: HotKeyCenter.Action) {
         switch action {

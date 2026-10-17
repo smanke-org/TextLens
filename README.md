@@ -35,6 +35,9 @@ Requires macOS 26 or later.
 All shortcuts can be changed in Settings › Shortcuts. From the menu you can also read text in image and PDF
 files, read a copied picture, and make QR codes.
 
+Every shortcut's action can also be run from a URL, for ToolHUD, Shortcuts or scripts: `textlens://capture`,
+`recapture`, `qr`, `translate`, `live-translate`, `watch` and `history` (for example `open textlens://capture`).
+
 Settings › Activity graphs how many captures you've made. With "Sync settings with your other Macs" turned
 on, it adds up the captures from every Mac that uses TextLens. Only the counts are shared through iCloud
 Drive, never what you captured.
