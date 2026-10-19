@@ -27,8 +27,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                             target: self, settings: #selector(showSettings))
         // Right below About in the app menu.
         mainMenu.items.first?.submenu?.insertItem(item("Our other apps…", #selector(showOtherApps)), at: 1)
+        // Help menu, with the standard ⌘? (macOS adds its search field).
+        let helpItem = NSMenuItem()
+        let help = NSMenu(title: "Help")
+        let helpOpen = NSMenuItem(title: "TextLens Help", action: #selector(showHelp), keyEquivalent: "?")
+        helpOpen.target = self
+        help.addItem(helpOpen)
+        helpItem.submenu = help
+        mainMenu.addItem(helpItem)
+        NSApp.helpMenu = help
         NSApp.mainMenu = mainMenu
         // Set at the end of the first launch, so its absence means a brand-new install.
+        #if DEBUG
+        // A test run shares the installed app's settings, so it checks Help and stops
+        // before sync or anything else starts.
+        if let snapshot = ProcessInfo.processInfo.environment["TEXTLENS_DEBUG_HELP_TEST"] {
+            DebugHelpTest.run(snapshot: snapshot, delegate: self)
+            return
+        }
+        #endif
         let newInstall = !AppDefaults.store.bool(forKey: "welcomed")
         if newInstall { SettingsSync.shared.adoptOnNewInstall() }
         SettingsSync.shared.start()
@@ -194,6 +211,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if Speech.shared.isSpeaking { menu.addItem(item("Stop Speaking", #selector(stopSpeaking))) }
 
         menu.addItem(.separator())
+        let helpEntry = NSMenuItem(title: "TextLens Help", action: #selector(showHelp), keyEquivalent: "")
+        helpEntry.target = self
+        helpEntry.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil)
+        menu.addItem(helpEntry)
         menu.addItem(item("Settings…", #selector(showSettings), key: ","))
         #if !APPSTORE
         if let staged = AutoUpdater.shared.staged {
@@ -276,6 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !ScreenAccess.request() { ScreenAccess.openSettings() }
     }
     @objc func showSettings() { SettingsWindow.shared.show() }
+    @objc func showHelp() { HelpWindow.shared.show() }
     @objc func checkForUpdates() { UpdateController.checkForUpdates() }
     @objc func installUpdateNow() { AutoUpdater.shared.installNow() }
     @objc func quit() { NSApp.terminate(nil) }

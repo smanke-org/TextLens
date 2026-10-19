@@ -31,6 +31,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    #if DEBUG
+    var debugWindow: NSWindow? { window }
+    #endif
+
     func windowWillClose(_ notification: Notification) {}
 }
 
@@ -57,9 +61,17 @@ final class SettingsTabs: NSTabViewController {
     private func add(_ title: String, _ symbol: String, _ view: some View) {
         let pane = VStack(spacing: 0) {
             view
-            Text("\(AppInfo.name) \(AppInfo.displayVersion)")
-                .font(.caption).foregroundStyle(.secondary)
-                .padding(.bottom, 12)
+            // The version in the middle, the round Help button in the corner, as macOS does.
+            ZStack {
+                Text("\(AppInfo.name) \(AppInfo.displayVersion)")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Spacer()
+                    HelpButton(topic: Help.topic(forSettingsTab: title)).fixedSize()
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
         }
         .frame(width: 520)
         // Each pane gets its natural height, capped to the screen, with the Form scrolling
