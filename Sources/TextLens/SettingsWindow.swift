@@ -434,6 +434,7 @@ struct GeneralSettings: View {
 
     var body: some View {
         Form {
+            AppearanceSection(appName: "TextLens") { SettingsSync.shared.localDidChange() }
             Section("Where TextLens appears") {
                 Toggle("Show in Dock", isOn: $presence.showInDock)
                 Toggle("Show in menu bar", isOn: $presence.showInMenuBar)

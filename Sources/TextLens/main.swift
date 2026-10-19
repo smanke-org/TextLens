@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let capture = Capture.shared
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppAppearance.start()
         let mainMenu = AppPresence.mainMenu(appName: AppInfo.name, settingsTitle: "Settings…",
                                             target: self, settings: #selector(showSettings))
         // Right below About in the app menu.
