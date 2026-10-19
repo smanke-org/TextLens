@@ -98,7 +98,7 @@ enum Help {
                 ("Read text aloud after capture", "Hear what was captured"),
             ]),
             .heading("Other ways in"),
-            .text("In the menu bar menu, \"Read Text in Files…\" reads images and PDFs, and \"Read Text in Copied Picture\" reads an image you've copied."),
+            .text("In the menu bar menu, \"Read Text in Files…\" reads images and PDFs, and \"Read Text in Copied Picture\" reads an image you've copied. Keep Line Breaks, Additive Clipboard and Read Aloud After Capture switch on and off right in the menu."),
         ]),
 
         HelpTopic(id: "qr", title: "QR and Bar Codes", symbol: "qrcode.viewfinder", blocks: [
