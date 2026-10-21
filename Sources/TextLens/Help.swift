@@ -78,6 +78,7 @@ enum Help {
             .heading("Allow Screen Recording"),
             .text("TextLens needs Screen Recording permission to see the screen. If the menu bar menu shows \"Allow Screen Recording…\", choose it, switch TextLens on, and open TextLens again. Everything is read on this Mac; nothing is uploaded."),
             .tip("The screen freezes while you select, so a menu, tooltip or video frame stays put while you drag over it."),
+            .tip("While ToolHUD is running, TextLens's menu moves into ToolHUD's menu bar menu as a submenu, and the icon here steps aside until ToolHUD quits. To keep the icon, turn off \"Put in ToolHUD's menu while ToolHUD is running\" in Settings."),
         ]),
 
         HelpTopic(id: "capture", title: "Capturing Text", symbol: "text.viewfinder", blocks: [
