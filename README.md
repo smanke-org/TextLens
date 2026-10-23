@@ -72,3 +72,7 @@ swift test          # layout, QR, change-detection, history and encryption tests
 ```
 
 Release: `./release.sh X.Y.Z` (notarizes, makes the DMG, tags and publishes the GitHub release).
+
+## License
+
+© 2026 Steve Manke. All rights reserved.
