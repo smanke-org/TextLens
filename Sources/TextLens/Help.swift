@@ -50,7 +50,7 @@ enum Help {
     static var debugTokens: String { resolve("{hotkey:capture} {hotkey:again} {hotkey:qr} {hotkey:translate} {hotkey:live} {hotkey:watch} {hotkey:history}") }
 
     /// The Settings tabs, for the Debug self-test.
-    static let testTabs = ["Capture", "Translate", "Watch", "History", "Activity", "Shortcuts", "Privacy", "General"]
+    static let testTabs = ["General", "Capture", "Translate", "Watch", "History", "Activity", "Shortcuts", "Privacy"]
 
     /// The topic each Settings tab's Help button opens.
     static func topic(forSettingsTab tab: String) -> String {
@@ -79,6 +79,7 @@ enum Help {
             .text("TextLens needs Screen Recording permission to see the screen. If the menu bar menu shows \"Allow Screen Recording…\", choose it, switch TextLens on, and open TextLens again. Everything is read on this Mac; nothing is uploaded."),
             .tip("The screen freezes while you select, so a menu, tooltip or video frame stays put while you drag over it."),
             .tip("While ToolHUD is running, TextLens's menu moves into ToolHUD's menu bar menu as a submenu, and the icon here steps aside until ToolHUD quits. To keep the icon, turn off \"Put in ToolHUD's menu while ToolHUD is running\" in Settings."),
+            .tip("Quitting asks first, since capture shortcuts and watches stop while TextLens is closed. Turn off \"Ask before quitting\" in Settings › General, or tick \"Don't ask again\" when it asks."),
         ]),
 
         HelpTopic(id: "capture", title: "Capturing Text", symbol: "text.viewfinder", blocks: [

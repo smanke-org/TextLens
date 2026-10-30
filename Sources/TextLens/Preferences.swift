@@ -74,6 +74,10 @@ final class Preferences {
     var watchHotKey: HotKey? = Defaults.watchHotKey { didSet { saveCodable(watchHotKey, "watchHotKey") } }
     var historyHotKey: HotKey? = Defaults.historyHotKey { didSet { saveCodable(historyHotKey, "historyHotKey") } }
 
+    // MARK: General
+    /// Quitting asks first, so a stray ⌘Q doesn't stop the capture shortcuts or a watch.
+    var confirmQuit = true { didSet { save(confirmQuit, "confirmQuit") } }
+
     enum Defaults {
         static let speechRate = 0.5
         static let liveInterval = 1.0
@@ -97,7 +101,7 @@ final class Preferences {
         "watchInterval", "watchTrigger", "watchSound", "watchSaveToHistory", "watchShowOutline",
         "historyEnabled", "historySync", "historyMaxCount", "historyMaxDays", "historySaveImages",
         "captureTextHotKey", "captureCodeHotKey", "captureAgainHotKey", "translateHotKey", "liveTranslateHotKey",
-        "watchHotKey", "historyHotKey",
+        "watchHotKey", "historyHotKey", "confirmQuit",
     ]
 
     @ObservationIgnored private var loading = false
@@ -133,6 +137,7 @@ final class Preferences {
             "captureAgainHotKey": data(captureAgainHotKey), "translateHotKey": data(translateHotKey),
             "liveTranslateHotKey": data(liveTranslateHotKey), "watchHotKey": data(watchHotKey),
             "historyHotKey": data(historyHotKey),
+            "confirmQuit": confirmQuit,
         ]
     }
 
@@ -198,6 +203,7 @@ final class Preferences {
         liveTranslateHotKey = codable("liveTranslateHotKey", Defaults.liveTranslateHotKey)
         watchHotKey = codable("watchHotKey", Defaults.watchHotKey)
         historyHotKey = codable("historyHotKey", Defaults.historyHotKey)
+        confirmQuit = bool("confirmQuit", true)
     }
 
     private func save(_ value: Any, _ key: String) {

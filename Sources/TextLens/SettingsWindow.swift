@@ -46,6 +46,7 @@ final class SettingsTabs: NSTabViewController {
         super.init(nibName: nil, bundle: nil)
         tabStyle = .toolbar
         transitionOptions = [.crossfade, .allowUserInteraction]
+        add("General", "gearshape", GeneralSettings())
         add("Capture", "text.viewfinder", CaptureSettings())
         add("Translate", "translate", TranslateSettings())
         add("Watch", "eye", WatchSettings())
@@ -53,7 +54,6 @@ final class SettingsTabs: NSTabViewController {
         add("Activity", "chart.bar.xaxis", ActivitySettings())
         add("Shortcuts", "keyboard", ShortcutSettings())
         add("Privacy", "hand.raised", PrivacySettings())
-        add("General", "gearshape", GeneralSettings())
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -468,6 +468,8 @@ struct GeneralSettings: View {
                 if let error = login.lastError {
                     Text(error).font(.callout).foregroundStyle(.red)
                 }
+                Toggle("Ask before quitting", isOn: $prefs.confirmQuit)
+                    .help("Quitting TextLens asks first, so a stray ⌘Q doesn't stop the capture shortcuts or a watch.")
             }
             Section {
                 Toggle("Sync settings with your other Macs", isOn: $sync.isEnabled)
