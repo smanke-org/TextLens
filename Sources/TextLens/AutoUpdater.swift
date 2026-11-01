@@ -104,6 +104,9 @@ final class AutoUpdater: NSObject, UNUserNotificationCenterDelegate {
         return
         #else
         if policy != .off { requestNotificationPermission() }
+        // Before "welcomed" is set for a new install, and before the automatic-update record is read.
+        WhatsNew.shared.noteLaunch(newInstall: !AppDefaults.store.bool(forKey: "welcomed"),
+                                   autoInstalledFrom: AppDefaults.store.string(forKey: Self.installedFromKey))
         announceIfJustUpdated()
 
         checkIfDue()
@@ -278,7 +281,7 @@ final class AutoUpdater: NSObject, UNUserNotificationCenterDelegate {
         AppDefaults.store.removeObject(forKey: Self.installedFromKey)
         guard from != AppInfo.version else { return }
         notify(id: "updated-\(AppInfo.version)", title: "TextLens updated to \(AppInfo.version)",
-               body: "It installed itself while your Mac wasn't in use.", installable: false)
+               body: "It installed itself while your Mac wasn't in use. Click to see what's new.", installable: false)
     }
 
     private func notifyAvailable(_ version: String) {
@@ -308,12 +311,15 @@ final class AutoUpdater: NSObject, UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
         let installable = response.notification.request.content.categoryIdentifier == Self.category
+        let updated = response.notification.request.identifier.hasPrefix("updated-")
         let historyID = response.notification.request.content.userInfo["historyID"] as? String
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 // Clicking the banner or its Install button opens the usual confirmation,
                 // so the user still sees what they're agreeing to.
                 if installable { UpdateController.checkForUpdates() }
+                // "Updated": Settings, which shows what changed.
+                if updated { SettingsWindow.shared.show() }
                 // A watched region's change opens History on the reading that fired it.
                 if let historyID { HistoryWindow.shared.show(selecting: UUID(uuidString: historyID)) }
             }
