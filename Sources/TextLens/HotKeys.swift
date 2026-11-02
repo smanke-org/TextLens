@@ -111,6 +111,19 @@ final class HotKeyCenter {
             case .history: return prefs.historyHotKey
             }
         }
+
+        /// As the Shortcuts settings name it.
+        var title: String {
+            switch self {
+            case .captureText: return "Capture text"
+            case .captureCode: return "Read QR or bar code"
+            case .captureAgain: return "Capture the same area again"
+            case .translate: return "Capture and translate"
+            case .liveTranslate: return "Live translate (start/stop)"
+            case .watch: return "Watch an area"
+            case .history: return "Show history"
+            }
+        }
     }
 
     static let shared = HotKeyCenter()
@@ -132,6 +145,15 @@ final class HotKeyCenter {
             } else {
                 NSLog("TextLens: shortcut \(key.display) for \(action) not registered (\(status)), probably taken by another app")
             }
+        }
+        ShortcutsLensReport.publish()
+    }
+
+    /// For ShortcutsLens: the shortcuts that registered, in Settings order.
+    var reportedShortcuts: [ShortcutsLensReport.Shortcut] {
+        Action.allCases.compactMap { action in
+            guard refs[action] != nil, let key = action.hotKey else { return nil }
+            return .init(id: "\(action)", title: action.title, keyCode: Int(key.keyCode), carbonModifiers: Int(key.modifiers))
         }
     }
 
