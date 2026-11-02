@@ -66,7 +66,7 @@ Requires macOS 26 or later.
 | ⌃⌥⌘W | Watch an area for changes |
 | ⌃⌥⌘H | Show history |
 
-All shortcuts can be changed in Settings › Shortcuts. From the menu you can also read text in image and PDF
+All shortcuts can be changed in Settings › Shortcuts, and ShortcutsLens lists them. From the menu you can also read text in image and PDF
 files, read a copied picture, and make QR codes.
 
 Every shortcut's action can also be run from a URL, for ToolHUD, Shortcuts or scripts: `textlens://capture`,
@@ -92,6 +92,8 @@ Settings › Privacy explains all of this in the app.
 
 TextLens checks for new versions once a day, or as often as you choose in Settings (a number of hours, days, weeks or months). In Settings › General you choose whether it installs them
 automatically when you're not using it, asks first, or doesn't check.
+The update window shows the notes for the latest releases, with the ones you don't have yet marked New. After
+an update that installed itself, Settings shows what changed the next time it opens.
 
 ## Build from source
 

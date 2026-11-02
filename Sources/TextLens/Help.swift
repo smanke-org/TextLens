@@ -150,7 +150,7 @@ enum Help {
                 ("Esc", "Cancel a selection"),
                 ("⌘?", "This Help, from TextLens's menus"),
             ]),
-            .text("Change them in Settings › Shortcuts: click a shortcut, then press the new keys. Delete clears it; shortcuts need ⌘, ⌥ or ⌃."),
+            .text("Change them in Settings › Shortcuts: click a shortcut, then press the new keys. Delete clears it; shortcuts need ⌘, ⌥ or ⌃. ShortcutsLens lists them under their own names."),
         ]),
 
         HelpTopic(id: "privacy", title: "Privacy", symbol: "hand.raised", blocks: [
