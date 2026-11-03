@@ -487,6 +487,10 @@ enum SyncKeychain {
     }
 
     static func loadKey() -> SymmetricKey? {
+        #if DEBUG
+        // An agent CLI test copy never reads the keychain: it has no sync.
+        if AgentSocket.isTestRun { return nil }
+        #endif
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

@@ -21,6 +21,12 @@ final class HistoryStore {
         if let override = ProcessInfo.processInfo.environment["TEXTLENS_HISTORY_FOLDER"] {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
+        #if DEBUG
+        // An agent CLI test copy keeps its history in the APP_STORE folder.
+        if AgentSocket.isTestRun, let store = ProcessInfo.processInfo.environment["APP_STORE"] {
+            return URL(fileURLWithPath: store, isDirectory: true).appending(path: "History", directoryHint: .isDirectory)
+        }
+        #endif
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appending(path: "TextLens/History", directoryHint: .isDirectory)
     }()

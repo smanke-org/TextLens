@@ -182,14 +182,7 @@ final class Capture {
             var texts: [String] = []
             var firstImage: CGImage?
             for url in files {
-                let images: [CGImage]
-                if UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) == true {
-                    images = Recognizer.pageImages(ofPDF: url)
-                } else if let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                    images = [image]
-                } else {
-                    images = []
-                }
+                let images = Self.images(in: url)
                 firstImage = firstImage ?? images.first
                 var pages: [String] = []
                 for image in images {
@@ -207,6 +200,17 @@ final class Capture {
             }
             deliver(texts.joined(separator: "\n\n"), image: firstImage, near: nil, app: app)
         }
+    }
+
+    /// A picture file as one image, or a PDF's pages (the first 50); empty when it's neither.
+    static func images(in url: URL) -> [CGImage] {
+        if UTType(filenameExtension: url.pathExtension)?.conforms(to: .pdf) == true {
+            return Recognizer.pageImages(ofPDF: url)
+        }
+        if let image = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            return [image]
+        }
+        return []
     }
 
     func recognizeClipboardImage() {

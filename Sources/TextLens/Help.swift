@@ -169,6 +169,15 @@ enum Help {
                 ("textlens://history", "Show history"),
             ]),
             .text("Use these links from Shortcuts, scripts or a launcher. ToolHUD's TextLens buttons use them."),
+            .heading("Command line and AI agents"),
+            .text("TextLens is also a command line tool, so scripts and AI agents such as Claude Code or Codex can read the text and codes in picture and PDF files, translate text, make QR codes, search and pin captures in history, and start captures. Commands run in the open app, and the History window shows each change at once. Reading a file copies nothing, and deleting from history needs --yes."),
+            .keys([
+                ("textlens help", "List every command and its options"),
+                ("textlens text read <file>", "Read the text in a picture or PDF"),
+                ("textlens history list --search invoice", "Find captures, as History's search does"),
+                ("textlens mcp", "Offer the same commands to MCP apps, such as Claude Desktop"),
+            ]),
+            .text("To type textlens in Terminal, link it once: ln -s /Applications/TextLens.app/Contents/MacOS/TextLens ~/.local/bin/textlens (with ~/.local/bin on your PATH). MCP apps take the full path to that program, followed by mcp."),
         ]),
 
         HelpTopic(id: "troubleshooting", title: "Troubleshooting", symbol: "wrench.and.screwdriver", blocks: [

@@ -76,6 +76,31 @@ Settings › Activity graphs how many captures you've made. With "Sync settings 
 on, it adds up the captures from every Mac that uses TextLens. Only the counts are shared through iCloud
 Drive, never what you captured.
 
+### Command line and AI agents
+
+TextLens is also a command line tool, so scripts and AI agents (Claude Code, Codex) can read the text and QR codes
+in picture and PDF files, translate text, make QR codes, search and pin captures in history, and start captures.
+Commands run in the open app, and the History window shows each change at once. Link it once to type `textlens`:
+
+```bash
+ln -s /Applications/TextLens.app/Contents/MacOS/TextLens ~/.local/bin/textlens
+```
+
+```bash
+textlens help
+textlens text read ~/Desktop/receipt.png
+textlens text translate --text "Where is the station?" --to fr --json
+textlens history list --search invoice --json
+```
+
+Every command takes `--json`. Reading a file copies nothing and saves nothing, and deleting from history only shows
+what it would delete until you add `--yes`. For MCP apps such as Claude Desktop, the same commands are served by
+`/Applications/TextLens.app/Contents/MacOS/TextLens mcp`:
+
+```bash
+claude mcp add --scope user textlens -- /Applications/TextLens.app/Contents/MacOS/TextLens mcp
+```
+
 ## Privacy
 
 Text recognition, translation and QR codes run entirely on your Mac. TextLens has no account, analytics or

@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+// `textlens <command>` (the app binary under a short name): run it against the running app and
+// exit, without starting a second copy. See Agent/AgentCLI.swift.
+if let code = AgentCLI.runIfRequested() { exit(code) }
+
 MainActor.assumeIsolated {
     // `TextLens --selftest <image-or-pdf> [target-language]` reads a file, prints its text,
     // codes and translation, and exits; used to check recognition without the UI.
@@ -83,6 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.mainMenu = mainMenu
         // Set at the end of the first launch, so its absence means a brand-new install.
         #if DEBUG
+        // A test run of the agent CLI (APP_STORE): its own history and settings, and the agent
+        // socket. Nothing else starts: no sync, shortcuts, menu bar item, ToolHUD hub or updater.
+        if AgentSocket.isTestRun {
+            _ = HistoryStore.shared
+            AgentSocket.listen { await AgentRouter.handle($0) }
+            return
+        }
         // A test run shares the installed app's settings, so it checks Help and stops
         // before sync or anything else starts.
         if let snapshot = ProcessInfo.processInfo.environment["TEXTLENS_DEBUG_HELP_TEST"] {
@@ -135,6 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         #endif
 
         HistoryStore.shared.prune()
+        // `textlens` and the MCP server talk to the app through this.
+        AgentSocket.listen { await AgentRouter.handle($0) }
         AutoUpdater.shared.start()
         // Sync is on but waiting for a passphrase (just updated from an unencrypted version,
         // or joining another Mac): say so where it can be entered, once per version.
