@@ -224,12 +224,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if !ScreenAccess.granted {
             let warn = item("Allow Screen Recording…", #selector(allowScreenRecording))
-            warn.image = NSImage(systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil)
+            warn.showIcon("exclamationmark.triangle")
             menu.addItem(warn)
             menu.addItem(.separator())
         }
 
-        for item in captureItems() { menu.addItem(item) }
+        for item in captureItems(titleIcons: true) { menu.addItem(item) }
 
         let watches = WatchManager.shared.watches
         if !watches.isEmpty {
@@ -271,7 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Read Text in Files…", #selector(recognizeFile)))
         menu.addItem(item("Read Text in Copied Picture", #selector(recognizeClipboard)))
         menu.addItem(item("Make QR Code…", #selector(makeQRCode)))
-        menu.addItem(item("History…", #selector(showHistory), hotKey: prefs.historyHotKey))
+        menu.addItem(item("History…", #selector(showHistory), hotKey: prefs.historyHotKey).showIcon("clock.arrow.circlepath"))
 
         menu.addItem(.separator())
         menu.addItem(toggle("Keep Line Breaks", prefs.keepLineBreaks, #selector(toggleLineBreaks)))
@@ -284,14 +284,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         helpEntry.target = self
         helpEntry.image = NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil)
         menu.addItem(helpEntry)
-        menu.addItem(item("Settings…", #selector(showSettings), key: ","))
+        menu.addItem(item("Settings…", #selector(showSettings), key: ",").showIcon("gearshape"))
         #if !APPSTORE
         if let staged = AutoUpdater.shared.staged {
-            menu.addItem(item("Update to \(staged.version) Now (Otherwise Installs When Idle)", #selector(installUpdateNow)))
+            menu.addItem(item("Update to \(staged.version) Now (Otherwise Installs When Idle)", #selector(installUpdateNow)).showIcon("arrow.down.circle"))
         } else if let pending = UpdateAvailability.shared.pending {
-            menu.addItem(item("Update to \(pending)…", #selector(checkForUpdates)))
+            menu.addItem(item("Update to \(pending)…", #selector(checkForUpdates)).showIcon("arrow.down.circle"))
         } else {
-            menu.addItem(item("Check for Updates…", #selector(checkForUpdates)))
+            menu.addItem(item("Check for Updates…", #selector(checkForUpdates)).showIcon("arrow.down.circle"))
         }
         #endif
         menu.addItem(item("About \(AppInfo.name)", #selector(showAbout)))
@@ -303,16 +303,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item("Quit \(AppInfo.name)", #selector(quit), key: "q"))
     }
 
-    private func captureItems() -> [NSMenuItem] {
+    /// `titleIcons` puts the main captures' icons in their titles (the menu bar menu), as menus
+    /// on macOS 27 draw no item images.
+    private func captureItems(titleIcons: Bool = false) -> [NSMenuItem] {
         let prefs = Preferences.shared
         let again = item("Capture Same Area Again", #selector(captureAgain), hotKey: prefs.captureAgainHotKey)
         again.isEnabled = capture.lastRegion != nil
         let live = LiveTranslator.shared.isRunning
+        let text = item("Capture Text", #selector(captureText), hotKey: prefs.captureTextHotKey, symbol: "text.viewfinder")
+        let code = item("Read QR or Bar Code", #selector(captureCode), hotKey: prefs.captureCodeHotKey, symbol: "qrcode.viewfinder")
+        let translate = item("Capture and Translate", #selector(captureTranslate), hotKey: prefs.translateHotKey, symbol: "translate")
+        if titleIcons {
+            text.showIcon("text.viewfinder")
+            code.showIcon("qrcode.viewfinder")
+            translate.showIcon("translate")
+        }
         return [
-            item("Capture Text", #selector(captureText), hotKey: prefs.captureTextHotKey, symbol: "text.viewfinder"),
+            text,
             again,
-            item("Read QR or Bar Code", #selector(captureCode), hotKey: prefs.captureCodeHotKey, symbol: "qrcode.viewfinder"),
-            item("Capture and Translate", #selector(captureTranslate), hotKey: prefs.translateHotKey, symbol: "translate"),
+            code,
+            translate,
             item(live ? "Stop Live Translation" : "Live Translate Area…", #selector(liveTranslate),
                  hotKey: prefs.liveTranslateHotKey, symbol: live ? "stop.circle" : "dot.radiowaves.left.and.right"),
             item("Watch Area for Changes…", #selector(watchRegion), hotKey: prefs.watchHotKey, symbol: "eye"),
