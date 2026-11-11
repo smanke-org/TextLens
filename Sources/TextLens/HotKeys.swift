@@ -26,6 +26,21 @@ struct HotKey: Codable, Equatable {
         display = Self.symbols(flags) + Self.name(for: event)
     }
 
+    /// Builds one from a key code and Carbon modifiers (ShortcutsLens's Change Shortcut), named
+    /// the way a key press would be in the current keyboard layout. Nil without ⌘ ⌥ or ⌃.
+    init?(keyCode: Int, carbonModifiers: Int) {
+        let mods = UInt32(carbonModifiers) & UInt32(controlKey | optionKey | shiftKey | cmdKey)
+        guard mods & UInt32(controlKey | optionKey | cmdKey) != 0, (0...127).contains(keyCode) else { return nil }
+        var flags: NSEvent.ModifierFlags = []
+        if mods & UInt32(controlKey) != 0 { flags.insert(.control) }
+        if mods & UInt32(optionKey) != 0 { flags.insert(.option) }
+        if mods & UInt32(shiftKey) != 0 { flags.insert(.shift) }
+        if mods & UInt32(cmdKey) != 0 { flags.insert(.command) }
+        self.keyCode = UInt32(keyCode)
+        modifiers = mods
+        display = Self.symbols(flags) + Self.name(keyCode: keyCode, characters: Self.layoutCharacter(keyCode))
+    }
+
     /// Whether a key press is this shortcut.
     func matches(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> Bool {
         UInt32(keyCode) == self.keyCode
@@ -62,7 +77,10 @@ struct HotKey: Codable, Equatable {
     }
 
     private static func name(for event: NSEvent) -> String {
-        let code = Int(event.keyCode)
+        name(keyCode: Int(event.keyCode), characters: event.charactersIgnoringModifiers)
+    }
+
+    private static func name(keyCode code: Int, characters: String?) -> String {
         if let f = fKeys[code] { return "F\(f)" }
         switch code {
         case kVK_Return: return "↩"
@@ -73,7 +91,24 @@ struct HotKey: Codable, Equatable {
         case kVK_RightArrow: return "→"
         case kVK_UpArrow: return "↑"
         case kVK_DownArrow: return "↓"
-        default: return (event.charactersIgnoringModifiers ?? "?").uppercased()
+        default: return (characters ?? "?").uppercased()
+        }
+    }
+
+    /// What the key types with no modifiers in the current layout ("t" for kVK_ANSI_T on QWERTY).
+    private static func layoutCharacter(_ keyCode: Int) -> String? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+        return data.withUnsafeBytes { raw -> String? in
+            guard let layout = raw.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return nil }
+            var dead: UInt32 = 0
+            var chars = [UniChar](repeating: 0, count: 4)
+            var length = 0
+            let status = UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                                        OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, chars.count, &length, &chars)
+            guard status == noErr, length > 0 else { return nil }
+            return String(utf16CodeUnits: chars, count: length)
         }
     }
 
@@ -154,6 +189,39 @@ final class HotKeyCenter {
         Action.allCases.compactMap { action in
             guard refs[action] != nil, let key = action.hotKey else { return nil }
             return .init(id: "\(action)", title: action.title, keyCode: Int(key.keyCode), carbonModifiers: Int(key.modifiers))
+        }
+    }
+
+    /// ShortcutsLens's Change Shortcut: saves the keys as the Settings recorder does (so Settings
+    /// shows them and sync carries them) and registers again. Nil when done, or why not.
+    func change(id: String, keyCode: Int, carbonModifiers: Int) -> String? {
+        guard let action = Action.allCases.first(where: { "\($0)" == id }) else { return "TextLens has no shortcut called \(id)." }
+        guard let key = HotKey(keyCode: keyCode, carbonModifiers: carbonModifiers) else {
+            return "TextLens shortcuts need ⌘, ⌥ or ⌃."
+        }
+        if let other = Action.allCases.first(where: { $0 != action && $0.hotKey?.keyCode == key.keyCode && $0.hotKey?.modifiers == key.modifiers }) {
+            return "TextLens already uses \(key.display) for \(other.title)."
+        }
+        let previous = action.hotKey
+        save(key, for: action)
+        apply()
+        guard refs[action] == nil else { return nil }
+        // Taken by another app: keep the old keys rather than leave the shortcut dead.
+        save(previous, for: action)
+        apply()
+        return "\(key.display) is taken by another app, so TextLens kept \(previous?.display ?? "no shortcut")."
+    }
+
+    private func save(_ key: HotKey?, for action: Action) {
+        let prefs = Preferences.shared
+        switch action {
+        case .captureText: prefs.captureTextHotKey = key
+        case .captureCode: prefs.captureCodeHotKey = key
+        case .captureAgain: prefs.captureAgainHotKey = key
+        case .translate: prefs.translateHotKey = key
+        case .liveTranslate: prefs.liveTranslateHotKey = key
+        case .watch: prefs.watchHotKey = key
+        case .history: prefs.historyHotKey = key
         }
     }
 
