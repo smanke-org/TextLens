@@ -49,6 +49,8 @@ struct ShortcutRecorder: NSViewRepresentable {
 
         @objc private func open() {
             guard popover == nil, window != nil else { popover?.close(); return }
+            // Settings may not have redrawn yet after keys moved off this shortcut.
+            if let action_ { hotKey = action_.hotKey }
             // The current shortcuts must not fire while new keys are pressed.
             HotKeyCenter.shared.unregisterAll()
             let model = ShortcutEditorModel(hotKey: hotKey, action: action_)
@@ -82,14 +84,21 @@ struct ShortcutRecorder: NSViewRepresentable {
                 hotKey = key
                 onChange?(key)
             }
-            popover?.close()
+            // Clean up now rather than waiting for popoverDidClose: that can come late, or
+            // never when the app isn't frontmost, which would leave every shortcut unregistered.
+            let shown = popover
+            closed()
+            shown?.close()
         }
 
+        /// Runs once per popover: from `finish`, or when the popover closes by itself (a click
+        /// outside it).
         private func closed() {
+            guard let popover else { return }
+            PopoverCloser.shared.onClose[ObjectIdentifier(popover)] = nil
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
-            if let popover { PopoverCloser.shared.onClose[ObjectIdentifier(popover)] = nil }
-            popover = nil
+            self.popover = nil
             model = nil
             refresh()
             // The binding writes Preferences synchronously, so this sees the new key.
@@ -185,14 +194,15 @@ struct ShortcutRecorder: NSViewRepresentable {
         // A named key from the menu ("F6", "Space") comes back through here as the field
         // updates; keep it whole rather than cutting it to its last character.
         if let code = keyCode, KeyNames.name(code) == text { return }
-        if text.count > 1, let last = text.last { keyText = String(last); return }
-        guard !text.isEmpty else { keyCode = nil; return }
-        if let (code, needsShift) = KeyNames.keyCode(for: text) {
+        // Only the last character typed counts.
+        let typed = text.last.map(String.init) ?? ""
+        keyText = typed
+        guard !typed.isEmpty else { keyCode = nil; return }
+        if let (code, needsShift) = KeyNames.keyCode(for: typed) {
             keyCode = code
             if needsShift { shift = true }
-            // Show the base key: ⇧ + = stays “=”, not “+”.
-            let base = KeyNames.name(code)
-            if base != text { keyText = base }
+            // Show the key's own name: ⇧ + = shows “=”, not “+”; k shows “K”.
+            keyText = KeyNames.name(code)
         } else {
             keyCode = nil
         }
@@ -326,15 +336,7 @@ enum KeyNames {
     static let functionKeys: [Int] = HotKey.fKeys.sorted { $0.value < $1.value }.map(\.key)
 
     static func name(_ code: Int) -> String {
-        switch code {
-        case kVK_Delete: return "⌫"
-        case kVK_ForwardDelete: return "⌦"
-        case kVK_Home: return "↖"
-        case kVK_End: return "↘"
-        case kVK_PageUp: return "⇞"
-        case kVK_PageDown: return "⇟"
-        default: return HotKey.name(keyCode: code, characters: HotKey.layoutCharacter(code))
-        }
+        HotKey.name(keyCode: code, characters: HotKey.layoutCharacter(code))
     }
 
     static func spoken(_ code: Int) -> String {

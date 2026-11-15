@@ -75,7 +75,14 @@ enum DebugShortcutEditorTest {
             note("plus with ⌃⌥⌘ → combo \(model.combo?.display ?? "-") problem \(model.problem ?? "-")")
             model.control = false; model.option = false; model.shift = false; model.command = false
             model.typed("k")
-            note("bare k → combo \(model.combo?.display ?? "-") problem \(model.problem ?? "-")")
+            note("bare k → key '\(model.keyText)' combo \(model.combo?.display ?? "-") problem \(model.problem ?? "-")")
+            model.choose(Int(kVK_ANSI_T))
+            model.typed("=")
+            note("= over T → key '\(model.keyText)' code \(model.keyCode.map(String.init) ?? "-") shift \(model.shift)")
+            model.typed("=k")
+            note("k typed after = → key '\(model.keyText)' code \(model.keyCode.map(String.init) ?? "-")")
+            model.typed("")
+            note("emptied → key '\(model.keyText)' code \(model.keyCode.map(String.init) ?? "-")")
             model.choose(Int(kVK_F6))
             note("F6 alone → combo \(model.combo?.display ?? "-") problem \(model.problem ?? "-")")
             try? await Task.sleep(for: .milliseconds(300))
@@ -91,6 +98,12 @@ enum DebugShortcutEditorTest {
             model.control = true; model.option = true; model.command = true
             model.choose(Int(kVK_ANSI_Q))
             note("⌃⌥⌘Q → combo \(model.combo?.display ?? "-") system \(model.systemUse ?? "-")")
+            let named = [kVK_Delete, kVK_ForwardDelete, kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown].map { code -> String in
+                model.choose(Int(code))
+                return "\(model.keyText)→\(model.combo?.display ?? "-")"
+            }
+            note("named keys with ⌃⌥⌘: \(named)")
+            model.choose(Int(kVK_ANSI_Q))
             model.control = false; model.option = false
             note("⌘Q → combo \(model.combo?.display ?? "-") system \(model.systemUse ?? "-")")
             guard let historyKey = prefs.historyHotKey else { note("no history key"); exit(1) }
@@ -99,6 +112,7 @@ enum DebugShortcutEditorTest {
             try? await Task.sleep(for: .milliseconds(300))
             render(capture.debugPopoverView, "editor-move.png")
             model.finish?(.set(model.combo))
+            note("right after Set (no wait): registered \(HotKeyCenter.shared.reportedShortcuts.count) box '\(capture.debugTitle)' editor gone \(capture.debugModel == nil)")
             await waitClosed(capture)
             note("after Set: \(state()); box '\(capture.debugTitle)' history box '\(history.debugTitle)'; registered \(HotKeyCenter.shared.reportedShortcuts.count); popover gone \(capture.debugModel == nil)")
 
