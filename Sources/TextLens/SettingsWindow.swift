@@ -444,15 +444,15 @@ struct ShortcutSettings: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Capture text") { ShortcutRecorder(hotKey: $prefs.captureTextHotKey) }
-                LabeledContent("Capture the same area again") { ShortcutRecorder(hotKey: $prefs.captureAgainHotKey) }
-                LabeledContent("Read QR or bar code") { ShortcutRecorder(hotKey: $prefs.captureCodeHotKey) }
-                LabeledContent("Capture and translate") { ShortcutRecorder(hotKey: $prefs.translateHotKey) }
-                LabeledContent("Live translate (start/stop)") { ShortcutRecorder(hotKey: $prefs.liveTranslateHotKey) }
-                LabeledContent("Watch an area") { ShortcutRecorder(hotKey: $prefs.watchHotKey) }
-                LabeledContent("Show history") { ShortcutRecorder(hotKey: $prefs.historyHotKey) }
+                LabeledContent("Capture text") { ShortcutRecorder(hotKey: $prefs.captureTextHotKey, action: .captureText) }
+                LabeledContent("Capture the same area again") { ShortcutRecorder(hotKey: $prefs.captureAgainHotKey, action: .captureAgain) }
+                LabeledContent("Read QR or bar code") { ShortcutRecorder(hotKey: $prefs.captureCodeHotKey, action: .captureCode) }
+                LabeledContent("Capture and translate") { ShortcutRecorder(hotKey: $prefs.translateHotKey, action: .translate) }
+                LabeledContent("Live translate (start/stop)") { ShortcutRecorder(hotKey: $prefs.liveTranslateHotKey, action: .liveTranslate) }
+                LabeledContent("Watch an area") { ShortcutRecorder(hotKey: $prefs.watchHotKey, action: .watch) }
+                LabeledContent("Show history") { ShortcutRecorder(hotKey: $prefs.historyHotKey, action: .history) }
             } footer: {
-                Text("Click a shortcut, then press the new keys. Delete clears it, Esc cancels. Shortcuts need ⌘, ⌥ or ⌃.")
+                Text("Click a shortcut to set it: pick the modifier keys and type a key, or press the shortcut. Shortcuts need ⌘, ⌥ or ⌃, except F-keys. Keys another shortcut has are moved here.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

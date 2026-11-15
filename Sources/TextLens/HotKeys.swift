@@ -20,17 +20,18 @@ struct HotKey: Codable, Equatable {
     /// steal ordinary typing from every app.
     init?(event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard !flags.intersection([.command, .option, .control]).isEmpty else { return nil }
+        guard !flags.intersection([.command, .option, .control]).isEmpty || Self.isFunctionKey(Int(event.keyCode)) else { return nil }
         keyCode = UInt32(event.keyCode)
         modifiers = Self.carbon(flags)
         display = Self.symbols(flags) + Self.name(for: event)
     }
 
     /// Builds one from a key code and Carbon modifiers (ShortcutsLens's Change Shortcut), named
-    /// the way a key press would be in the current keyboard layout. Nil without ⌘ ⌥ or ⌃.
+    /// the way a key press would be in the current keyboard layout. Nil without ⌘ ⌥ or ⌃,
+    /// unless it's an F-key.
     init?(keyCode: Int, carbonModifiers: Int) {
         let mods = UInt32(carbonModifiers) & UInt32(controlKey | optionKey | shiftKey | cmdKey)
-        guard mods & UInt32(controlKey | optionKey | cmdKey) != 0, (0...127).contains(keyCode) else { return nil }
+        guard (0...127).contains(keyCode), mods & UInt32(controlKey | optionKey | cmdKey) != 0 || Self.isFunctionKey(keyCode) else { return nil }
         var flags: NSEvent.ModifierFlags = []
         if mods & UInt32(controlKey) != 0 { flags.insert(.control) }
         if mods & UInt32(optionKey) != 0 { flags.insert(.option) }
@@ -58,7 +59,10 @@ struct HotKey: Codable, Equatable {
         return (key.count == 1 ? key : "", mask)
     }
 
-    private static func carbon(_ flags: NSEvent.ModifierFlags) -> UInt32 {
+    /// F1–F20 may stand alone: no app types with them.
+    static func isFunctionKey(_ code: Int) -> Bool { fKeys[code] != nil }
+
+    static func carbon(_ flags: NSEvent.ModifierFlags) -> UInt32 {
         var carbon: UInt32 = 0
         if flags.contains(.control) { carbon |= UInt32(controlKey) }
         if flags.contains(.option) { carbon |= UInt32(optionKey) }
@@ -67,7 +71,7 @@ struct HotKey: Codable, Equatable {
         return carbon
     }
 
-    private static func symbols(_ flags: NSEvent.ModifierFlags) -> String {
+    static func symbols(_ flags: NSEvent.ModifierFlags) -> String {
         var s = ""
         if flags.contains(.control) { s += "⌃" }
         if flags.contains(.option) { s += "⌥" }
@@ -80,7 +84,7 @@ struct HotKey: Codable, Equatable {
         name(keyCode: Int(event.keyCode), characters: event.charactersIgnoringModifiers)
     }
 
-    private static func name(keyCode code: Int, characters: String?) -> String {
+    static func name(keyCode code: Int, characters: String?) -> String {
         if let f = fKeys[code] { return "F\(f)" }
         switch code {
         case kVK_Return: return "↩"
@@ -96,7 +100,7 @@ struct HotKey: Codable, Equatable {
     }
 
     /// What the key types with no modifiers in the current layout ("t" for kVK_ANSI_T on QWERTY).
-    private static func layoutCharacter(_ keyCode: Int) -> String? {
+    static func layoutCharacter(_ keyCode: Int, shift: Bool = false) -> String? {
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
               let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
         let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
@@ -105,7 +109,7 @@ struct HotKey: Codable, Equatable {
             var dead: UInt32 = 0
             var chars = [UniChar](repeating: 0, count: 4)
             var length = 0
-            let status = UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+            let status = UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), shift ? UInt32(shiftKey >> 8) & 0xFF : 0, UInt32(LMGetKbdType()),
                                         OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, chars.count, &length, &chars)
             guard status == noErr, length > 0 else { return nil }
             return String(utf16CodeUnits: chars, count: length)
@@ -114,7 +118,7 @@ struct HotKey: Codable, Equatable {
 
     /// Key code → F-key number. A table, not a range: the codes are scattered (F1 is 122,
     /// F20 is 90).
-    private static let fKeys: [Int: Int] = {
+    static let fKeys: [Int: Int] = {
         let codes = [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
                      kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20]
         return Dictionary(uniqueKeysWithValues: codes.enumerated().map { ($1, $0 + 1) })
@@ -197,7 +201,7 @@ final class HotKeyCenter {
     func change(id: String, keyCode: Int, carbonModifiers: Int) -> String? {
         guard let action = Action.allCases.first(where: { "\($0)" == id }) else { return "TextLens has no shortcut called \(id)." }
         guard let key = HotKey(keyCode: keyCode, carbonModifiers: carbonModifiers) else {
-            return "TextLens shortcuts need ⌘, ⌥ or ⌃."
+            return "TextLens shortcuts need ⌘, ⌥ or ⌃ (F-keys may stand alone)."
         }
         if let other = Action.allCases.first(where: { $0 != action && $0.hotKey?.keyCode == key.keyCode && $0.hotKey?.modifiers == key.modifiers }) {
             return "TextLens already uses \(key.display) for \(other.title)."
@@ -212,7 +216,8 @@ final class HotKeyCenter {
         return "\(key.display) is taken by another app, so TextLens kept \(previous?.display ?? "no shortcut")."
     }
 
-    private func save(_ key: HotKey?, for action: Action) {
+    /// Writes the same settings the Settings shortcut boxes do.
+    func save(_ key: HotKey?, for action: Action) {
         let prefs = Preferences.shared
         switch action {
         case .captureText: prefs.captureTextHotKey = key
@@ -223,6 +228,13 @@ final class HotKeyCenter {
         case .watch: prefs.watchHotKey = key
         case .history: prefs.historyHotKey = key
         }
+    }
+
+    func title(of action: Action) -> String { action.title }
+
+    /// The other shortcuts that use these keys.
+    func others(using key: HotKey, except action: Action?) -> [Action] {
+        Action.allCases.filter { $0 != action && $0.hotKey?.keyCode == key.keyCode && $0.hotKey?.modifiers == key.modifiers }
     }
 
     /// Whether a key press is one of TextLens's own shortcuts.
@@ -258,78 +270,4 @@ private func hotKeyHandler(_ next: EventHandlerCallRef?, _ event: EventRef?, _ d
     // Carbon delivers hot keys on the main thread's event loop.
     MainActor.assumeIsolated { HotKeyCenter.shared.fire(value) }
     return noErr
-}
-
-/// Click, then press a shortcut. Esc cancels, Delete clears.
-struct ShortcutRecorder: NSViewRepresentable {
-    @Binding var hotKey: HotKey?
-
-    func makeNSView(context: Context) -> RecorderButton {
-        let view = RecorderButton()
-        view.onChange = { hotKey = $0 }
-        view.hotKey = hotKey
-        return view
-    }
-
-    func updateNSView(_ view: RecorderButton, context: Context) {
-        view.onChange = { hotKey = $0 }
-        view.hotKey = hotKey
-    }
-
-    final class RecorderButton: NSButton {
-        var onChange: ((HotKey?) -> Void)?
-        var hotKey: HotKey? { didSet { refresh() } }
-        private var recording = false { didSet { refresh() } }
-        private var monitor: Any?
-
-        override init(frame: NSRect) {
-            super.init(frame: frame)
-            bezelStyle = .rounded
-            target = self
-            action = #selector(toggle)
-            refresh()
-        }
-
-        required init?(coder: NSCoder) { fatalError() }
-
-        override var intrinsicContentSize: NSSize { NSSize(width: 140, height: super.intrinsicContentSize.height) }
-
-        private func refresh() {
-            title = recording ? "Press a shortcut…" : (hotKey?.display ?? "Click to set")
-        }
-
-        @objc private func toggle() {
-            recording ? stop() : start()
-        }
-
-        private func start() {
-            recording = true
-            HotKeyCenter.shared.unregisterAll()
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self else { return event }
-                switch Int(event.keyCode) {
-                case kVK_Escape:
-                    self.stop()
-                case kVK_Delete, kVK_ForwardDelete:
-                    self.hotKey = nil
-                    self.onChange?(nil)
-                    self.stop()
-                default:
-                    guard let key = HotKey(event: event) else { NSSound.beep(); return nil }
-                    self.hotKey = key
-                    self.onChange?(key)
-                    self.stop()
-                }
-                return nil
-            }
-        }
-
-        private func stop() {
-            recording = false
-            if let monitor { NSEvent.removeMonitor(monitor) }
-            monitor = nil
-            // The binding writes Preferences synchronously, so this sees the new key.
-            HotKeyCenter.shared.apply()
-        }
-    }
 }

@@ -150,7 +150,7 @@ enum Help {
                 ("Esc", "Cancel a selection"),
                 ("⌘?", "This Help, from TextLens's menus"),
             ]),
-            .text("Change them in Settings › Shortcuts: click a shortcut, then press the new keys. Delete clears it; shortcuts need ⌘, ⌥ or ⌃. ShortcutsLens lists them under their own names."),
+            .text("Change them in Settings › Shortcuts. Click a shortcut to open its editor: turn on the modifier keys (⌃ ⌥ ⇧ ⌘), type a letter, number or symbol, or pick Space, an arrow or an F-key from the keyboard menu — or just press the shortcut. Shortcuts need ⌘, ⌥ or ⌃, except F-keys. If another TextLens shortcut has the keys, they move to this one and the other is cleared. Clear removes a shortcut. ShortcutsLens lists them under their own names."),
         ]),
 
         HelpTopic(id: "privacy", title: "Privacy", symbol: "hand.raised", blocks: [

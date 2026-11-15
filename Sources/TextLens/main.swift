@@ -100,6 +100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DebugHelpTest.run(snapshot: snapshot, delegate: self)
             return
         }
+        // The shortcut editor, worked and drawn to PNGs; also starts nothing else.
+        if let folder = ProcessInfo.processInfo.environment["TEXTLENS_DEBUG_SHORTCUT_EDITOR"] {
+            DebugShortcutEditorTest.run(folder: folder)
+            return
+        }
         if let how = ProcessInfo.processInfo.environment["TEXTLENS_DEBUG_QUIT_TEST"] {
             DebugQuitTest.run(how)
             return
